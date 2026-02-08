@@ -66,20 +66,8 @@ const Briefing = () => {
     }
   };
 
-  const handleDismissSlack = (ts: string) => {
-    setDismissedSlackTs((prev) => new Set(prev).add(ts));
-    toast('Message dismissed');
-  };
 
-  const handleSendNudge = async (msg: SlackMessage, nudgeText: string) => {
-    try {
-      await sendSlackNudge(msg.channel, nudgeText, msg.timestamp);
-      setDismissedSlackTs((prev) => new Set(prev).add(msg.timestamp));
-      toast.success('Nudge sent!', { description: 'Reply sent to thread.' });
-    } catch (err: any) {
-      toast.error('Failed to send nudge', { description: err.message });
-    }
-  };
+
 
   const handleDismissGmail = (id: string) => {
     setDismissedGmailIds((prev) => new Set(prev).add(id));

@@ -14,11 +14,43 @@ export type Database = {
   }
   public: {
     Tables: {
+      integrations: {
+        Row: {
+          api_token: string | null
+          config: Json | null
+          created_at: string
+          id: string
+          provider: string
+          updated_at: string
+          user_id: string
+        }
+        Insert: {
+          api_token?: string | null
+          config?: Json | null
+          created_at?: string
+          id?: string
+          provider: string
+          updated_at?: string
+          user_id: string
+        }
+        Update: {
+          api_token?: string | null
+          config?: Json | null
+          created_at?: string
+          id?: string
+          provider?: string
+          updated_at?: string
+          user_id?: string
+        }
+        Relationships: []
+      }
       nudge_followups: {
         Row: {
           assignee: string | null
           channel_id: string
           created_at: string
+          external_task_id: string | null
+          external_task_url: string | null
           followup_at: string
           id: string
           processed_message_id: string
@@ -32,6 +64,8 @@ export type Database = {
           assignee?: string | null
           channel_id: string
           created_at?: string
+          external_task_id?: string | null
+          external_task_url?: string | null
           followup_at: string
           id?: string
           processed_message_id: string
@@ -45,6 +79,8 @@ export type Database = {
           assignee?: string | null
           channel_id?: string
           created_at?: string
+          external_task_id?: string | null
+          external_task_url?: string | null
           followup_at?: string
           id?: string
           processed_message_id?: string
@@ -146,6 +182,8 @@ export type Database = {
           channel_id: string
           created_at: string
           deadline: string | null
+          external_task_id: string | null
+          external_task_url: string | null
           id: string
           is_actionable: boolean
           nudge_sent: boolean
@@ -163,6 +201,8 @@ export type Database = {
           channel_id: string
           created_at?: string
           deadline?: string | null
+          external_task_id?: string | null
+          external_task_url?: string | null
           id?: string
           is_actionable?: boolean
           nudge_sent?: boolean
@@ -180,6 +220,8 @@ export type Database = {
           channel_id?: string
           created_at?: string
           deadline?: string | null
+          external_task_id?: string | null
+          external_task_url?: string | null
           id?: string
           is_actionable?: boolean
           nudge_sent?: boolean

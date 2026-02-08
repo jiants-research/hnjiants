@@ -5,6 +5,7 @@ import { useSlackChannels } from '@/hooks/useSlack';
 import { useNavigate } from 'react-router-dom';
 import { LogOut, Hash, Check, Loader2 } from 'lucide-react';
 import { toast } from 'sonner';
+import { IntegrationSettings } from '@/components/IntegrationSettings';
 
 const Settings = () => {
   const { user, signOut } = useAuth();
@@ -96,6 +97,9 @@ const Settings = () => {
           )}
         </div>
       </div>
+
+      {/* Integrations */}
+      <IntegrationSettings />
 
       {/* Sign Out */}
       <button

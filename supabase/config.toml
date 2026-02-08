@@ -17,3 +17,6 @@ verify_jwt = false
 
 [functions.check-followups]
 verify_jwt = false
+
+[functions.create-external-task]
+verify_jwt = false

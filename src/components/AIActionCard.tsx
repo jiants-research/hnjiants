@@ -4,6 +4,7 @@ import { Button } from '@/components/ui/button';
 import { Textarea } from '@/components/ui/textarea';
 import { useState } from 'react';
 import type { AnalyzedMessage, UrgencyLevel } from '@/hooks/useNudgeAnalysis';
+import { CreateTaskButton } from '@/components/CreateTaskButton';
 
 interface AIActionCardProps {
   item: AnalyzedMessage;
@@ -53,7 +54,7 @@ export const AIActionCard = ({ item, index, onDismiss, onSendNudge, isSending }:
       transition={{ duration: 0.35, delay: index * 0.06, ease: [0.25, 0.46, 0.45, 0.94] }}
       className={`bg-card border rounded-2xl p-5 space-y-3 ${urgency.borderClass}`}
     >
-      {/* Top row: Urgency badge + sent status */}
+      {/* Top row: Urgency badge + sent status + linked badge */}
       <div className="flex items-center gap-2 flex-wrap">
         <div className={`flex items-center gap-1.5 px-2.5 py-1 rounded-full text-[11px] font-semibold uppercase tracking-wider border ${urgency.className}`}>
           {urgency.icon}
@@ -64,6 +65,18 @@ export const AIActionCard = ({ item, index, onDismiss, onSendNudge, isSending }:
             Nudge sent
           </span>
         )}
+        <CreateTaskButton
+          title={item.task_summary || 'Task from Slack'}
+          description={item.trigger_message || undefined}
+          assignee={item.assignee || undefined}
+          urgency={item.urgency}
+          deadline={item.deadline || undefined}
+          sourceType="processed_message"
+          sourceId={item.id}
+          externalTaskUrl={(item as any).external_task_url}
+          externalTaskId={(item as any).external_task_id}
+          variant="compact"
+        />
       </div>
 
       {/* Task Summary */}

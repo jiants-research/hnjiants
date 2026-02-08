@@ -13,7 +13,7 @@ import {
 import { ChannelSelector } from '@/components/ChannelSelector';
 import { AIActionCard } from '@/components/AIActionCard';
 import { FollowupBanner } from '@/components/FollowupBanner';
-import { SlackMessageCard } from '@/components/SlackMessageCard';
+
 import { GmailCard } from '@/components/GmailCard';
 import { toast } from 'sonner';
 import { Activity, Brain, Loader2, MessageSquare, Mail, Hash } from 'lucide-react';

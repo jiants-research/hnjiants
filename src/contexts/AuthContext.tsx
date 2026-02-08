@@ -18,6 +18,7 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
   const [user, setUser] = useState<User | null>(null);
   const [session, setSession] = useState<Session | null>(null);
   const [loading, setLoading] = useState(true);
+  const [providerToken, setProviderToken] = useState<string | null>(null);
 
   useEffect(() => {
     // Set up auth state listener FIRST

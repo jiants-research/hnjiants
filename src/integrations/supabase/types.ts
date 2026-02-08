@@ -25,6 +25,7 @@ export type Database = {
           slack_message_ts: string
           status: string
           task_summary: string
+          urgency: string
           user_id: string | null
         }
         Insert: {
@@ -37,6 +38,7 @@ export type Database = {
           slack_message_ts: string
           status?: string
           task_summary: string
+          urgency?: string
           user_id?: string | null
         }
         Update: {
@@ -49,6 +51,7 @@ export type Database = {
           slack_message_ts?: string
           status?: string
           task_summary?: string
+          urgency?: string
           user_id?: string | null
         }
         Relationships: [
@@ -149,7 +152,9 @@ export type Database = {
           nudge_sent_at: string | null
           slack_message_ts: string
           task_summary: string | null
+          trigger_message: string | null
           updated_at: string
+          urgency: string
           user_id: string | null
         }
         Insert: {
@@ -164,7 +169,9 @@ export type Database = {
           nudge_sent_at?: string | null
           slack_message_ts: string
           task_summary?: string | null
+          trigger_message?: string | null
           updated_at?: string
+          urgency?: string
           user_id?: string | null
         }
         Update: {
@@ -179,7 +186,9 @@ export type Database = {
           nudge_sent_at?: string | null
           slack_message_ts?: string
           task_summary?: string | null
+          trigger_message?: string | null
           updated_at?: string
+          urgency?: string
           user_id?: string | null
         }
         Relationships: []

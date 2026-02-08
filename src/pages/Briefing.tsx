@@ -50,6 +50,8 @@ const Briefing = () => {
   const { data: followups = [] } = useNudgeFollowups();
   const resolveFollowup = useResolveFollowup();
   const sendReminder = useSendReminder();
+  const markNudgeSent = useMarkNudgeSent();
+  const createFollowup = useCreateFollowup();
 
   // Auto-analyze when new Slack messages arrive (with dedup fingerprint)
   const lastAnalyzedFingerprint = useRef<string>('');

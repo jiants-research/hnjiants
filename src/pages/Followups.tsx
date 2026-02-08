@@ -256,15 +256,45 @@ const FollowupCard = ({
       transition={{ duration: 0.35, delay: index * 0.06, ease: [0.25, 0.46, 0.45, 0.94] }}
       className="bg-card border border-border rounded-2xl p-5 space-y-3"
     >
-      {/* Status Badge */}
-      <div className="flex items-center justify-between">
-        <span className={`text-[11px] font-semibold uppercase tracking-wider px-2.5 py-1 rounded-full ${status.className}`}>
-          {status.label}
-        </span>
-        <span className="text-xs text-muted-foreground">
-          {format(new Date(followup.followup_at), 'MMM d, yyyy')}
-        </span>
-      </div>
+      {/* Status Badge + Due Time */}
+      {(() => {
+        const dueDate = new Date(followup.followup_at);
+        const now = new Date();
+        const isOverdue = dueDate <= now;
+        const diffMs = dueDate.getTime() - now.getTime();
+        const hoursUntilDue = diffMs / (1000 * 60 * 60);
+
+        let dueBadge: { label: string; className: string };
+        if (followup.status === 'resolved') {
+          dueBadge = { label: 'Resolved', className: 'bg-green-500/10 text-green-500' };
+        } else if (followup.status === 'sent') {
+          dueBadge = { label: 'Reminder Sent', className: 'bg-amber-500/10 text-amber-500' };
+        } else if (isOverdue) {
+          dueBadge = { label: `Overdue · ${formatDistanceToNow(dueDate)} ago`, className: 'bg-destructive/10 text-destructive' };
+        } else if (hoursUntilDue <= 4) {
+          dueBadge = { label: `Due in ${formatDistanceToNow(dueDate)}`, className: 'bg-destructive/10 text-destructive' };
+        } else if (hoursUntilDue <= 24) {
+          dueBadge = { label: `Due in ${formatDistanceToNow(dueDate)}`, className: 'bg-amber-500/10 text-amber-500' };
+        } else {
+          dueBadge = { label: `Due in ${formatDistanceToNow(dueDate)}`, className: 'bg-primary/10 text-primary' };
+        }
+
+        return (
+          <div className="flex items-center justify-between">
+            <span className={`text-[11px] font-semibold uppercase tracking-wider px-2.5 py-1 rounded-full ${status.className}`}>
+              {status.label}
+            </span>
+            <span className={`text-[11px] font-semibold px-2.5 py-1 rounded-full flex items-center gap-1.5 ${dueBadge.className}`}>
+              {isOverdue && followup.status === 'pending' ? (
+                <AlertCircle className="w-3 h-3" />
+              ) : (
+                <Clock className="w-3 h-3" />
+              )}
+              {dueBadge.label}
+            </span>
+          </div>
+        );
+      })()}
 
       {/* Task */}
       <div className="space-y-1">
@@ -277,14 +307,10 @@ const FollowupCard = ({
         )}
       </div>
 
-      {/* Time info */}
+      {/* Date */}
       <div className="flex items-center gap-2 text-xs text-muted-foreground">
-        <Clock className="w-3.5 h-3.5 text-primary" />
-        <span>
-          {new Date(followup.followup_at) <= new Date()
-            ? `Due ${formatDistanceToNow(new Date(followup.followup_at), { addSuffix: true })}`
-            : `Scheduled ${formatDistanceToNow(new Date(followup.followup_at), { addSuffix: true })}`}
-        </span>
+        <Clock className="w-3.5 h-3.5" />
+        <span>{format(new Date(followup.followup_at), 'MMM d, yyyy · h:mm a')}</span>
       </div>
 
       {/* Actions */}

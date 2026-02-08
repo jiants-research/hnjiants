@@ -9,6 +9,7 @@ import { Layout } from "@/components/Layout";
 import Briefing from "./pages/Briefing";
 import TeamPulse from "./pages/TeamPulse";
 import Followups from "./pages/Followups";
+import Settings from "./pages/Settings";
 import Auth from "./pages/Auth";
 import NotFound from "./pages/NotFound";
 
@@ -26,6 +27,7 @@ const App = () => (
             <Route path="/" element={<ProtectedRoute><Layout><Briefing /></Layout></ProtectedRoute>} />
             <Route path="/follow-ups" element={<ProtectedRoute><Layout><Followups /></Layout></ProtectedRoute>} />
             <Route path="/team-pulse" element={<ProtectedRoute><Layout><TeamPulse /></Layout></ProtectedRoute>} />
+            <Route path="/settings" element={<ProtectedRoute><Layout><Settings /></Layout></ProtectedRoute>} />
             <Route path="*" element={<NotFound />} />
           </Routes>
         </AuthProvider>

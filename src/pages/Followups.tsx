@@ -326,6 +326,16 @@ const FollowupCard = ({
             <Check className="w-4 h-4 mr-2" />
             Resolved
           </Button>
+          <CreateTaskButton
+            title={followup.task_summary}
+            assignee={followup.assignee || undefined}
+            urgency={followup.urgency}
+            sourceType="followup"
+            sourceId={followup.id}
+            externalTaskUrl={(followup as any).external_task_url}
+            externalTaskId={(followup as any).external_task_id}
+            variant="compact"
+          />
           <Button
             className="flex-1 h-11 rounded-xl font-semibold glow-primary transition-all active:scale-[0.97]"
             onClick={onSendReminder}

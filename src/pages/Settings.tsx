@@ -98,6 +98,9 @@ const Settings = () => {
         </div>
       </div>
 
+      {/* Integrations */}
+      <IntegrationSettings />
+
       {/* Sign Out */}
       <button
         onClick={handleSignOut}

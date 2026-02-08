@@ -26,6 +26,9 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
       (event, session) => {
         setSession(session);
         setUser(session?.user ?? null);
+        if (session?.provider_token) {
+          setProviderToken(session.provider_token);
+        }
         setLoading(false);
       }
     );

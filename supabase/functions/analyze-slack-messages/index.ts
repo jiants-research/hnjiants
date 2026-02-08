@@ -13,13 +13,17 @@ interface SlackMessageInput {
   original_message: string;
   timestamp: string;
   channel: string;
+  thread_ts?: string | null;
 }
 
-interface AIAnalysis {
-  is_actionable: boolean;
-  task_summary: string | null;
-  deadline: string | null;
-  assignee: string | null;
+interface ConversationUnit {
+  index: number;
+  type: "standalone" | "thread";
+  thread_ts: string | null;
+  timestamps: string[];
+  conversation_text: string;
+  primary_sender: string;
+  messages: SlackMessageInput[];
 }
 
 serve(async (req) => {
@@ -41,7 +45,6 @@ serve(async (req) => {
     const supabaseKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
     const supabase = createClient(supabaseUrl, supabaseKey);
 
-    // Verify user
     const anonClient = createClient(supabaseUrl, Deno.env.get("SUPABASE_ANON_KEY")!);
     const token = authHeader.replace("Bearer ", "");
     const { data: { user }, error: authError } = await anonClient.auth.getUser(token);
@@ -64,19 +67,26 @@ serve(async (req) => {
       });
     }
 
-    // Check which messages are already processed (cache layer)
-    const timestamps = messages.map((m) => m.timestamp);
+    // ── Step 1: Group messages into conversation units ──
+    const conversationUnits = groupByThread(messages);
+    console.log(`Grouped ${messages.length} messages into ${conversationUnits.length} conversation units (${conversationUnits.filter(u => u.type === 'thread').length} threads, ${conversationUnits.filter(u => u.type === 'standalone').length} standalone)`);
+
+    // ── Step 2: Dedup — check which conversation units are already processed ──
+    // Use the primary timestamp (thread_ts for threads, message ts for standalone) as the key
+    const primaryTimestamps = conversationUnits.map(u => u.thread_ts || u.timestamps[0]);
     const { data: existing } = await supabase
       .from("slack_processed_messages")
       .select("slack_message_ts")
       .eq("channel_id", channel_id)
-      .in("slack_message_ts", timestamps);
+      .in("slack_message_ts", primaryTimestamps);
 
     const existingTs = new Set((existing || []).map((e: any) => e.slack_message_ts));
-    const newMessages = messages.filter((m) => !existingTs.has(m.timestamp));
+    const newUnits = conversationUnits.filter(u => {
+      const key = u.thread_ts || u.timestamps[0];
+      return !existingTs.has(key);
+    });
 
-    if (newMessages.length === 0) {
-      // Return already-cached results
+    if (newUnits.length === 0) {
       const { data: cached } = await supabase
         .from("slack_processed_messages")
         .select("*")
@@ -90,20 +100,19 @@ serve(async (req) => {
       });
     }
 
-    // Batch messages for AI analysis (OpenAI)
+    // ── Step 3: AI analysis on conversation units ──
     const OPENAI_API_KEY = Deno.env.get("OPENAI_API_KEY");
     if (!OPENAI_API_KEY) {
       throw new Error("OPENAI_API_KEY is not configured");
     }
 
-    const messagesForAI = newMessages.map((m, i) => ({
+    const unitsForAI = newUnits.map((u, i) => ({
       index: i,
-      sender: m.employee_name,
-      text: m.original_message,
-      timestamp: m.timestamp,
+      type: u.type,
+      conversation: u.conversation_text,
     }));
 
-    console.log(`Analyzing ${newMessages.length} new messages from channel ${channel_id}`);
+    console.log(`Analyzing ${newUnits.length} new conversation units from channel ${channel_id}`);
 
     const aiResponse = await fetch("https://api.openai.com/v1/chat/completions", {
       method: "POST",
@@ -116,26 +125,28 @@ serve(async (req) => {
         messages: [
           {
             role: "system",
-            content: `You are a workplace message analyzer. For each message, determine if it contains:
-1. An explicit task or "to-do"
-2. A deadline (specific date/time) or a "missing" deadline (e.g., "Where is that report?")
-3. Contextual urgency
+            content: `You are a workplace message analyzer. You will receive conversation units — each is either a single standalone message or a full thread conversation.
 
-You must analyze ALL messages provided and return results for each one.
+For THREAD conversations, analyze the entire thread as a whole to determine:
+1. Whether the thread contains an explicit task, to-do, or request
+2. Whether there's a deadline (specific date/time) or a missing deliverable
+3. Whether the conversation indicates something unresolved or needs follow-up
 
-Return your analysis using the analyze_messages function.`,
+For STANDALONE messages, analyze individually.
+
+Return your analysis using the analyze_conversations function. Every conversation unit must have a result.`,
           },
           {
             role: "user",
-            content: `Analyze these Slack messages and determine which ones are actionable:\n\n${JSON.stringify(messagesForAI, null, 2)}`,
+            content: `Analyze these conversation units:\n\n${JSON.stringify(unitsForAI, null, 2)}`,
           },
         ],
         tools: [
           {
             type: "function",
             function: {
-              name: "analyze_messages",
-              description: "Return analysis results for all messages",
+              name: "analyze_conversations",
+              description: "Return analysis results for all conversation units",
               parameters: {
                 type: "object",
                 properties: {
@@ -144,8 +155,8 @@ Return your analysis using the analyze_messages function.`,
                     items: {
                       type: "object",
                       properties: {
-                        index: { type: "number", description: "The message index from the input" },
-                        is_actionable: { type: "boolean", description: "True if message contains a task, deadline, or urgent request" },
+                        index: { type: "number", description: "The conversation unit index" },
+                        is_actionable: { type: "boolean", description: "True if the conversation contains a task, unresolved request, or deadline" },
                         task_summary: { type: "string", description: "Brief summary of the task/request, or null" },
                         deadline: { type: "string", description: "Extracted deadline if any, or null" },
                         assignee: { type: "string", description: "Who the task is assigned to, or null" },
@@ -161,7 +172,7 @@ Return your analysis using the analyze_messages function.`,
             },
           },
         ],
-        tool_choice: { type: "function", function: { name: "analyze_messages" } },
+        tool_choice: { type: "function", function: { name: "analyze_conversations" } },
       }),
     });
 
@@ -180,7 +191,7 @@ Return your analysis using the analyze_messages function.`,
     const aiData = await aiResponse.json();
     const toolCall = aiData.choices?.[0]?.message?.tool_calls?.[0];
 
-    let analyses: AIAnalysis[] = [];
+    let analyses: any[] = [];
     if (toolCall?.function?.arguments) {
       try {
         const parsed = JSON.parse(toolCall.function.arguments);
@@ -190,9 +201,10 @@ Return your analysis using the analyze_messages function.`,
       }
     }
 
-    console.log(`AI returned ${analyses.length} analyses, ${analyses.filter((a: any) => a.is_actionable).length} actionable`);
+    const actionableCount = analyses.filter((a: any) => a.is_actionable).length;
+    console.log(`AI returned ${analyses.length} analyses, ${actionableCount} actionable`);
 
-    // Now generate nudge drafts for actionable messages
+    // ── Step 4: Generate nudge drafts for actionable units ──
     const actionableAnalyses = analyses.filter((a: any) => a.is_actionable);
     let nudgeDrafts: Record<number, string> = {};
 
@@ -210,18 +222,21 @@ Return your analysis using the analyze_messages function.`,
               role: "system",
               content: `You are a polite workplace assistant. Generate context-aware follow-up nudge messages.
 Each nudge should be friendly, professional, and reference the specific task/deadline.
-Keep nudges to 1-2 sentences. Use the person's first name.`,
+Keep nudges to 1-2 sentences. Use the person's first name when available.`,
             },
             {
               role: "user",
               content: `Generate nudge messages for these actionable items:\n\n${JSON.stringify(
-                actionableAnalyses.map((a: any) => ({
-                  index: a.index,
-                  sender: newMessages[a.index]?.employee_name,
-                  task: a.task_summary,
-                  deadline: a.deadline,
-                  original: newMessages[a.index]?.original_message,
-                }))
+                actionableAnalyses.map((a: any) => {
+                  const unit = newUnits[a.index];
+                  return {
+                    index: a.index,
+                    sender: unit?.primary_sender,
+                    task: a.task_summary,
+                    deadline: a.deadline,
+                    conversation: unit?.conversation_text,
+                  };
+                })
               )}`,
             },
           ],
@@ -230,7 +245,7 @@ Keep nudges to 1-2 sentences. Use the person's first name.`,
               type: "function",
               function: {
                 name: "generate_nudges",
-                description: "Return nudge drafts for each actionable message",
+                description: "Return nudge drafts for each actionable conversation",
                 parameters: {
                   type: "object",
                   properties: {
@@ -273,11 +288,12 @@ Keep nudges to 1-2 sentences. Use the person's first name.`,
       }
     }
 
-    // Store all results in DB (cache layer)
-    const records = newMessages.map((msg, i) => {
+    // ── Step 5: Store results — one record per conversation unit ──
+    const records = newUnits.map((unit, i) => {
       const analysis = analyses.find((a: any) => a.index === i) || { is_actionable: false };
+      const primaryTs = unit.thread_ts || unit.timestamps[0];
       return {
-        slack_message_ts: msg.timestamp,
+        slack_message_ts: primaryTs,
         channel_id,
         is_actionable: (analysis as any).is_actionable || false,
         task_summary: (analysis as any).task_summary || null,
@@ -296,54 +312,46 @@ Keep nudges to 1-2 sentences. Use the person's first name.`,
       console.error("Insert error:", insertError);
     }
 
-    // Create follow-up entries for actionable items (T+2 days)
-    const followupRecords = records
-      .filter((r) => r.is_actionable)
-      .map((r) => ({
-        processed_message_id: undefined as any, // will be set after insert
-        channel_id: r.channel_id,
-        slack_message_ts: r.slack_message_ts,
-        task_summary: r.task_summary || "Follow up on task",
-        assignee: r.assignee,
-        followup_at: new Date(Date.now() + 2 * 24 * 60 * 60 * 1000).toISOString(), // T+2 days
-        user_id: user.id,
-        status: "pending",
-      }));
+    // ── Step 6: Create follow-up entries for actionable items ──
+    const actionableRecords = records.filter((r) => r.is_actionable);
 
-    if (followupRecords.length > 0) {
-      // Get the IDs of the just-inserted processed messages
+    if (actionableRecords.length > 0) {
       const { data: insertedMsgs } = await supabase
         .from("slack_processed_messages")
         .select("id, slack_message_ts")
         .eq("channel_id", channel_id)
         .eq("is_actionable", true)
         .eq("user_id", user.id)
-        .in("slack_message_ts", followupRecords.map((r) => r.slack_message_ts));
+        .in("slack_message_ts", actionableRecords.map((r) => r.slack_message_ts));
 
       if (insertedMsgs) {
         const tsToId = Object.fromEntries(insertedMsgs.map((m: any) => [m.slack_message_ts, m.id]));
-        const validFollowups = followupRecords
+        const followupRecords = actionableRecords
           .filter((r) => tsToId[r.slack_message_ts])
           .map((r) => ({
-            ...r,
             processed_message_id: tsToId[r.slack_message_ts],
+            channel_id: r.channel_id,
+            slack_message_ts: r.slack_message_ts,
+            task_summary: r.task_summary || "Follow up on task",
+            assignee: r.assignee,
+            followup_at: new Date(Date.now() + 2 * 24 * 60 * 60 * 1000).toISOString(),
+            user_id: user.id,
+            status: "pending",
           }));
 
-        if (validFollowups.length > 0) {
-          // Check for existing followups to avoid duplicates
-          const { data: existingFollowups } = await supabase
-            .from("nudge_followups")
-            .select("slack_message_ts")
-            .eq("channel_id", channel_id)
-            .in("slack_message_ts", validFollowups.map((r) => r.slack_message_ts));
+        // Deduplicate against existing followups
+        const { data: existingFollowups } = await supabase
+          .from("nudge_followups")
+          .select("slack_message_ts")
+          .eq("channel_id", channel_id)
+          .in("slack_message_ts", followupRecords.map((r) => r.slack_message_ts));
 
-          const existingFollowupTs = new Set((existingFollowups || []).map((f: any) => f.slack_message_ts));
-          const newFollowups = validFollowups.filter((f) => !existingFollowupTs.has(f.slack_message_ts));
+        const existingFollowupTs = new Set((existingFollowups || []).map((f: any) => f.slack_message_ts));
+        const newFollowups = followupRecords.filter((f) => !existingFollowupTs.has(f.slack_message_ts));
 
-          if (newFollowups.length > 0) {
-            await supabase.from("nudge_followups").insert(newFollowups);
-            console.log(`Created ${newFollowups.length} follow-up entries`);
-          }
+        if (newFollowups.length > 0) {
+          await supabase.from("nudge_followups").insert(newFollowups);
+          console.log(`Created ${newFollowups.length} follow-up entries`);
         }
       }
     }
@@ -360,8 +368,8 @@ Keep nudges to 1-2 sentences. Use the person's first name.`,
     return new Response(
       JSON.stringify({
         results: allActionable || [],
-        new_count: newMessages.length,
-        actionable_count: actionableAnalyses.length,
+        new_count: newUnits.length,
+        actionable_count: actionableCount,
       }),
       { headers: { ...corsHeaders, "Content-Type": "application/json" } }
     );
@@ -373,3 +381,55 @@ Keep nudges to 1-2 sentences. Use the person's first name.`,
     });
   }
 });
+
+// ── Helper: Group flat messages into conversation units ──
+function groupByThread(messages: SlackMessageInput[]): ConversationUnit[] {
+  const threadMap = new Map<string, SlackMessageInput[]>();
+  const standalone: SlackMessageInput[] = [];
+
+  for (const msg of messages) {
+    if (msg.thread_ts) {
+      const group = threadMap.get(msg.thread_ts) || [];
+      group.push(msg);
+      threadMap.set(msg.thread_ts, group);
+    } else {
+      standalone.push(msg);
+    }
+  }
+
+  const units: ConversationUnit[] = [];
+  let idx = 0;
+
+  // Standalone messages
+  for (const msg of standalone) {
+    units.push({
+      index: idx++,
+      type: "standalone",
+      thread_ts: null,
+      timestamps: [msg.timestamp],
+      conversation_text: `${msg.employee_name}: ${msg.original_message}`,
+      primary_sender: msg.employee_name,
+      messages: [msg],
+    });
+  }
+
+  // Threaded conversations — sorted by timestamp
+  for (const [threadTs, msgs] of threadMap) {
+    const sorted = msgs.sort((a, b) => parseFloat(a.timestamp) - parseFloat(b.timestamp));
+    const conversationText = sorted
+      .map((m) => `${m.employee_name}: ${m.original_message}`)
+      .join("\n");
+
+    units.push({
+      index: idx++,
+      type: "thread",
+      thread_ts: threadTs,
+      timestamps: sorted.map((m) => m.timestamp),
+      conversation_text: conversationText,
+      primary_sender: sorted[0].employee_name,
+      messages: sorted,
+    });
+  }
+
+  return units;
+}

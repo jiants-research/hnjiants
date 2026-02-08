@@ -80,6 +80,7 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
   };
 
   const signOut = async () => {
+    clearProviderToken();
     await supabase.auth.signOut();
   };
 

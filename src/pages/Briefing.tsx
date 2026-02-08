@@ -10,21 +10,28 @@ import {
   useResolveFollowup,
   useSendReminder,
 } from '@/hooks/useNudgeAnalysis';
+import { useDefaultChannel } from '@/hooks/useDefaultChannel';
 import { ChannelSelector } from '@/components/ChannelSelector';
 import { AIActionCard } from '@/components/AIActionCard';
 import { FollowupBanner } from '@/components/FollowupBanner';
-
 import { GmailCard } from '@/components/GmailCard';
 import { toast } from 'sonner';
 import { Activity, Brain, Loader2, Mail, Hash } from 'lucide-react';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
-import { Button } from '@/components/ui/button';
 
 const Briefing = () => {
   const { providerToken } = useAuth();
   const [selectedChannel, setSelectedChannel] = useState<string | null>(null);
   const [dismissedGmailIds, setDismissedGmailIds] = useState<Set<string>>(new Set());
   const [dismissedAnalyzedIds, setDismissedAnalyzedIds] = useState<Set<string>>(new Set());
+
+  // Auto-select default channel
+  const { data: defaultChannelId } = useDefaultChannel();
+  useEffect(() => {
+    if (defaultChannelId && !selectedChannel) {
+      setSelectedChannel(defaultChannelId);
+    }
+  }, [defaultChannelId, selectedChannel]);
 
   const { data: slackMessages = [], isLoading: slackLoading } = useSlackMessages(selectedChannel);
   const { data: gmailMessages = [], isLoading: gmailLoading } = useGmailMessages(providerToken);
@@ -41,7 +48,6 @@ const Briefing = () => {
     if (slackMessages.length > 0 && selectedChannel && !analyzeMutation.isPending) {
       analyzeMutation.mutate(slackMessages);
     }
-    // Only trigger on new messages, not on mutation state changes
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [slackMessages, selectedChannel]);
 
@@ -58,6 +64,8 @@ const Briefing = () => {
   const handleSendAINudge = async (item: typeof analyzedMessages[0], nudgeText: string) => {
     try {
       await sendSlackNudge(item.channel_id, nudgeText, item.slack_message_ts);
+      // Dismiss the card immediately after sending
+      setDismissedAnalyzedIds((prev) => new Set(prev).add(item.id));
       toast.success('AI nudge sent!', { description: 'Reply sent as thread.' });
       // Refresh data
       analyzeMutation.mutate(slackMessages);

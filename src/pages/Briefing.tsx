@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react';
 import { AnimatePresence } from 'framer-motion';
-import { useSlackMessages, sendSlackNudge, SlackMessage } from '@/hooks/useSlack';
+import { useSlackMessages, sendSlackNudge } from '@/hooks/useSlack';
 import { useGmailMessages } from '@/hooks/useGmail';
 import { useAuth } from '@/contexts/AuthContext';
 import {

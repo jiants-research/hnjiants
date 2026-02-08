@@ -16,7 +16,7 @@ import { FollowupBanner } from '@/components/FollowupBanner';
 
 import { GmailCard } from '@/components/GmailCard';
 import { toast } from 'sonner';
-import { Activity, Brain, Loader2, MessageSquare, Mail, Hash } from 'lucide-react';
+import { Activity, Brain, Loader2, Mail, Hash } from 'lucide-react';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { Button } from '@/components/ui/button';
 

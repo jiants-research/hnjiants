@@ -1,16 +1,12 @@
 import { ReactNode } from 'react';
 import { BottomNav } from '@/components/BottomNav';
-import { Zap, LogOut } from 'lucide-react';
-import { useAuth } from '@/contexts/AuthContext';
-import { Button } from '@/components/ui/button';
+import { Zap } from 'lucide-react';
 
 interface LayoutProps {
   children: ReactNode;
 }
 
 export const Layout = ({ children }: LayoutProps) => {
-  const { signOut } = useAuth();
-
   return (
     <div className="min-h-screen bg-background flex flex-col">
       {/* Header */}
@@ -25,16 +21,6 @@ export const Layout = ({ children }: LayoutProps) => {
           <span className="text-muted-foreground text-xs font-medium tracking-wider uppercase ml-1">
             Engine
           </span>
-          <div className="ml-auto">
-            <Button
-              variant="ghost"
-              size="icon"
-              onClick={signOut}
-              className="w-8 h-8 text-muted-foreground hover:text-foreground"
-            >
-              <LogOut className="w-4 h-4" />
-            </Button>
-          </div>
         </div>
       </header>
 

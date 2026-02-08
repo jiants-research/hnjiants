@@ -1,9 +1,8 @@
-import { useState, useEffect } from 'react';
+import { useState } from 'react';
 import { AnimatePresence } from 'framer-motion';
-import { useQuery, useQueryClient } from '@tanstack/react-query';
+import { useQuery } from '@tanstack/react-query';
 import { NudgeCard } from '@/components/NudgeCard';
 import { supabase } from '@/integrations/supabase/client';
-import { useAuth } from '@/contexts/AuthContext';
 import { toast } from 'sonner';
 import { Activity, Loader2 } from 'lucide-react';
 import type { Tables } from '@/integrations/supabase/types';
@@ -12,27 +11,6 @@ type OpenLoop = Tables<'open_loops'>;
 
 const Briefing = () => {
   const [dismissedIds, setDismissedIds] = useState<Set<string>>(new Set());
-  const [seeded, setSeeded] = useState(false);
-  const { session } = useAuth();
-  const queryClient = useQueryClient();
-
-  // Seed demo data for new users
-  useEffect(() => {
-    if (!session?.access_token || seeded) return;
-
-    const seedData = async () => {
-      try {
-        await supabase.functions.invoke('seed-demo-data', {
-          headers: { Authorization: `Bearer ${session.access_token}` },
-        });
-        setSeeded(true);
-        queryClient.invalidateQueries({ queryKey: ['open_loops'] });
-      } catch {
-        // Ignore seed errors
-      }
-    };
-    seedData();
-  }, [session?.access_token, seeded, queryClient]);
 
   const { data: loops = [], isLoading } = useQuery({
     queryKey: ['open_loops'],
@@ -47,7 +25,6 @@ const Briefing = () => {
       if (error) throw error;
       return data as OpenLoop[];
     },
-    enabled: !!session,
   });
 
   const visibleLoops = loops.filter((l) => !dismissedIds.has(l.id));
@@ -55,12 +32,14 @@ const Briefing = () => {
   const handleDismiss = async (id: string) => {
     setDismissedIds((prev) => new Set(prev).add(id));
     toast('Loop dismissed', { description: 'Removed from your briefing.' });
+
     await supabase.from('open_loops').update({ dismissed: true }).eq('id', id);
   };
 
   const handleSendNudge = async (id: string, _message: string) => {
     setDismissedIds((prev) => new Set(prev).add(id));
     toast.success('Nudge sent!', { description: 'Message delivered via Slack.' });
+
     await supabase.from('open_loops').update({ nudge_sent: true }).eq('id', id);
   };
 

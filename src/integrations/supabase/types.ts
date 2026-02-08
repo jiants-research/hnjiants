@@ -14,7 +14,48 @@ export type Database = {
   }
   public: {
     Tables: {
-      [_ in never]: never
+      open_loops: {
+        Row: {
+          ai_draft_response: string
+          channel: string
+          created_at: string
+          dismissed: boolean
+          due_date: string
+          employee_name: string
+          id: string
+          nudge_sent: boolean
+          original_message: string
+          status: string
+          updated_at: string
+        }
+        Insert: {
+          ai_draft_response: string
+          channel?: string
+          created_at?: string
+          dismissed?: boolean
+          due_date: string
+          employee_name: string
+          id?: string
+          nudge_sent?: boolean
+          original_message: string
+          status?: string
+          updated_at?: string
+        }
+        Update: {
+          ai_draft_response?: string
+          channel?: string
+          created_at?: string
+          dismissed?: boolean
+          due_date?: string
+          employee_name?: string
+          id?: string
+          nudge_sent?: boolean
+          original_message?: string
+          status?: string
+          updated_at?: string
+        }
+        Relationships: []
+      }
     }
     Views: {
       [_ in never]: never

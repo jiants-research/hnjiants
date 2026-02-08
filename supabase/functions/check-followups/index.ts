@@ -27,18 +27,20 @@ serve(async (req) => {
     const supabaseServiceKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
     const token = authHeader.replace("Bearer ", "");
 
-    // Auth client with the user's token to validate JWT
+    // Validate JWT using getClaims (works with Lovable Cloud signing keys)
     const authClient = createClient(supabaseUrl, supabaseAnonKey, {
       global: { headers: { Authorization: authHeader } },
     });
-    const { data: { user }, error: authError } = await authClient.auth.getUser(token);
-    if (authError || !user) {
-      console.error("[check-followups] Auth failed:", authError?.message);
+    const { data: claimsData, error: claimsError } = await authClient.auth.getClaims(token);
+    if (claimsError || !claimsData?.claims?.sub) {
+      console.error("[check-followups] Auth failed:", claimsError?.message);
       return new Response(JSON.stringify({ error: "Unauthorized" }), {
         status: 401,
         headers: { ...corsHeaders, "Content-Type": "application/json" },
       });
     }
+
+    const user = { id: claimsData.claims.sub as string };
 
     // Service role client for DB operations (bypasses RLS)
     const supabase = createClient(supabaseUrl, supabaseServiceKey);

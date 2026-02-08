@@ -8,6 +8,7 @@ import {
 } from '@/hooks/useNudgeAnalysis';
 import { toast } from 'sonner';
 import { Bell, Check, Clock, Send, Brain, CheckCircle, AlertCircle } from 'lucide-react';
+import { CreateTaskButton } from '@/components/CreateTaskButton';
 import { Button } from '@/components/ui/button';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { formatDistanceToNow, format } from 'date-fns';

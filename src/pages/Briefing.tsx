@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { AnimatePresence } from 'framer-motion';
 import { useSlackMessages, sendSlackNudge } from '@/hooks/useSlack';
 import { useGmailMessages } from '@/hooks/useGmail';

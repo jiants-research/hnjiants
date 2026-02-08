@@ -152,6 +152,39 @@ Deno.serve(async (req) => {
 
 // ── Linear Implementation ──
 
+// Resolve a team key (e.g. "HNJ") or UUID to the actual team UUID
+async function resolveTeamId(apiToken: string, teamIdOrKey: string): Promise<string> {
+  // If it looks like a UUID already, return as-is
+  if (teamIdOrKey.includes('-') && teamIdOrKey.length > 20) {
+    return teamIdOrKey;
+  }
+
+  // Otherwise, look up by key
+  const query = `
+    query {
+      teams {
+        nodes { id key name }
+      }
+    }
+  `;
+
+  const res = await fetch('https://api.linear.app/graphql', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', 'Authorization': apiToken },
+    body: JSON.stringify({ query }),
+  });
+
+  const data = await res.json();
+  if (data.errors) throw new Error(`Failed to fetch teams: ${data.errors[0].message}`);
+
+  const teams = data.data?.teams?.nodes || [];
+  const match = teams.find((t: any) => t.key === teamIdOrKey || t.id === teamIdOrKey);
+  if (!match) throw new Error(`Team "${teamIdOrKey}" not found. Available: ${teams.map((t: any) => t.key).join(', ')}`);
+
+  console.log(`[Linear] Resolved team key "${teamIdOrKey}" to UUID "${match.id}" (${match.name})`);
+  return match.id;
+}
+
 async function createLinearIssue(
   apiToken: string,
   config: Record<string, string>,
@@ -159,8 +192,10 @@ async function createLinearIssue(
   description: string,
   urgency?: string,
 ) {
-  const teamId = config.team_id;
-  if (!teamId) throw new Error('Linear team_id not configured');
+  const rawTeamId = config.team_id;
+  if (!rawTeamId) throw new Error('Linear team_id not configured');
+
+  const teamId = await resolveTeamId(apiToken, rawTeamId);
 
   const priorityMap: Record<string, number> = { critical: 1, high: 2, medium: 3, low: 4 };
   const priority = priorityMap[urgency || 'medium'] || 3;
@@ -173,6 +208,8 @@ async function createLinearIssue(
       }
     }
   `;
+
+  console.log('[Linear] Creating issue:', { teamId, title, priority });
 
   const res = await fetch('https://api.linear.app/graphql', {
     method: 'POST',

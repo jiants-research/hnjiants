@@ -14,6 +14,53 @@ export type Database = {
   }
   public: {
     Tables: {
+      nudge_followups: {
+        Row: {
+          assignee: string | null
+          channel_id: string
+          created_at: string
+          followup_at: string
+          id: string
+          processed_message_id: string
+          slack_message_ts: string
+          status: string
+          task_summary: string
+          user_id: string | null
+        }
+        Insert: {
+          assignee?: string | null
+          channel_id: string
+          created_at?: string
+          followup_at: string
+          id?: string
+          processed_message_id: string
+          slack_message_ts: string
+          status?: string
+          task_summary: string
+          user_id?: string | null
+        }
+        Update: {
+          assignee?: string | null
+          channel_id?: string
+          created_at?: string
+          followup_at?: string
+          id?: string
+          processed_message_id?: string
+          slack_message_ts?: string
+          status?: string
+          task_summary?: string
+          user_id?: string | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "nudge_followups_processed_message_id_fkey"
+            columns: ["processed_message_id"]
+            isOneToOne: false
+            referencedRelation: "slack_processed_messages"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       open_loops: {
         Row: {
           ai_draft_response: string
@@ -83,6 +130,54 @@ export type Database = {
           id?: string
           updated_at?: string
           user_id?: string
+        }
+        Relationships: []
+      }
+      slack_processed_messages: {
+        Row: {
+          ai_nudge_draft: string | null
+          assignee: string | null
+          channel_id: string
+          created_at: string
+          deadline: string | null
+          id: string
+          is_actionable: boolean
+          nudge_sent: boolean
+          nudge_sent_at: string | null
+          slack_message_ts: string
+          task_summary: string | null
+          updated_at: string
+          user_id: string | null
+        }
+        Insert: {
+          ai_nudge_draft?: string | null
+          assignee?: string | null
+          channel_id: string
+          created_at?: string
+          deadline?: string | null
+          id?: string
+          is_actionable?: boolean
+          nudge_sent?: boolean
+          nudge_sent_at?: string | null
+          slack_message_ts: string
+          task_summary?: string | null
+          updated_at?: string
+          user_id?: string | null
+        }
+        Update: {
+          ai_nudge_draft?: string | null
+          assignee?: string | null
+          channel_id?: string
+          created_at?: string
+          deadline?: string | null
+          id?: string
+          is_actionable?: boolean
+          nudge_sent?: boolean
+          nudge_sent_at?: string | null
+          slack_message_ts?: string
+          task_summary?: string | null
+          updated_at?: string
+          user_id?: string | null
         }
         Relationships: []
       }

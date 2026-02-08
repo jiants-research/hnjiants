@@ -1,1 +1,19 @@
 project_id = "uvuiryrlqgljdrmfccjh"
+
+[functions.fetch-gmail]
+verify_jwt = false
+
+[functions.fetch-slack-messages]
+verify_jwt = false
+
+[functions.list-slack-channels]
+verify_jwt = false
+
+[functions.send-slack-message]
+verify_jwt = false
+
+[functions.analyze-slack-messages]
+verify_jwt = false
+
+[functions.check-followups]
+verify_jwt = false

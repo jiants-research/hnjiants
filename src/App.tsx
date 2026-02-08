@@ -9,6 +9,7 @@ import { Layout } from "@/components/Layout";
 import Briefing from "./pages/Briefing";
 import TeamPulse from "./pages/TeamPulse";
 import Followups from "./pages/Followups";
+import Settings from "./pages/Settings";
 import Auth from "./pages/Auth";
 import NotFound from "./pages/NotFound";
 

@@ -64,6 +64,9 @@ serve(async (req) => {
       (m: SlackMessage) => m.reply_count && m.reply_count > 0 && m.ts
     );
 
+    // Track which top-level messages are thread parents
+    const threadParentTs = new Set(threadedMessages.map((m: SlackMessage) => m.ts));
+
     // Fetch thread replies in parallel (limit to 10 threads to avoid rate limits)
     const threadsToFetch = threadedMessages.slice(0, 10);
     const threadReplies: SlackMessage[] = [];
@@ -97,8 +100,14 @@ serve(async (req) => {
       console.log(`Fetched ${threadReplies.length} thread replies`);
     }
 
+    // Tag parent messages that have threads with their own ts as thread_ts
+    const taggedTopLevel = topLevelMessages.map((m: SlackMessage) => ({
+      ...m,
+      thread_ts: threadParentTs.has(m.ts) ? m.ts : undefined,
+    }));
+
     // Combine top-level messages and thread replies
-    const allMessages = [...topLevelMessages, ...threadReplies];
+    const allMessages = [...taggedTopLevel, ...threadReplies];
 
     // Collect unique user IDs
     const userIds = [

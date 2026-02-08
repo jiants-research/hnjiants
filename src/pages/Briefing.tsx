@@ -183,32 +183,13 @@ const Briefing = () => {
                 </div>
               )}
 
-              {/* All Messages */}
-              <div className="text-sm text-muted-foreground">
-                {visibleSlack.length} message{visibleSlack.length !== 1 ? 's' : ''}
-              </div>
-
-              {slackLoading ? (
+              {slackLoading && (
                 <div className="flex items-center justify-center py-20">
                   <Loader2 className="w-6 h-6 text-primary animate-spin" />
                 </div>
-              ) : (
-                <div className="space-y-4">
-                  <AnimatePresence mode="popLayout">
-                    {visibleSlack.map((msg, i) => (
-                      <SlackMessageCard
-                        key={msg.timestamp}
-                        message={msg}
-                        index={i}
-                        onDismiss={() => handleDismissSlack(msg.timestamp)}
-                        onSendNudge={(text) => handleSendNudge(msg, text)}
-                      />
-                    ))}
-                  </AnimatePresence>
-                </div>
               )}
 
-              {!slackLoading && visibleSlack.length === 0 && visibleAnalyzed.length === 0 && (
+              {!slackLoading && visibleAnalyzed.length === 0 && !analyzeMutation.isPending && (
                 <EmptyState
                   icon={<MessageSquare className="w-7 h-7 text-primary" />}
                   title="No messages"

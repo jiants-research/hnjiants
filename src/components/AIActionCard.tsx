@@ -4,6 +4,7 @@ import { Button } from '@/components/ui/button';
 import { Textarea } from '@/components/ui/textarea';
 import { useState } from 'react';
 import type { AnalyzedMessage, UrgencyLevel } from '@/hooks/useNudgeAnalysis';
+import { CreateTaskButton } from '@/components/CreateTaskButton';
 
 interface AIActionCardProps {
   item: AnalyzedMessage;

@@ -9,6 +9,8 @@ import {
   useNudgeFollowups,
   useResolveFollowup,
   useSendReminder,
+  useMarkNudgeSent,
+  useCreateFollowup,
 } from '@/hooks/useNudgeAnalysis';
 import { useDefaultChannel } from '@/hooks/useDefaultChannel';
 import { ChannelSelector } from '@/components/ChannelSelector';

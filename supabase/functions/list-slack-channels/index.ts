@@ -17,7 +17,7 @@ serve(async (req) => {
     }
 
     const res = await fetch(
-      "https://slack.com/api/conversations.list?types=public_channel,private_channel&exclude_archived=true&limit=100",
+      "https://slack.com/api/conversations.list?types=public_channel&exclude_archived=true&limit=100",
       {
         headers: {
           Authorization: `Bearer ${SLACK_BOT_TOKEN}`,
@@ -27,9 +27,10 @@ serve(async (req) => {
     );
 
     const data = await res.json();
+    console.log("Slack API response:", JSON.stringify({ ok: data.ok, error: data.error, needed: data.needed, provided: data.provided }));
 
     if (!data.ok) {
-      throw new Error(`Slack API error: ${data.error}`);
+      throw new Error(`Slack API error: ${data.error}. Needed: ${data.needed || 'unknown'}. Provided: ${data.provided || 'unknown'}`);
     }
 
     const channels = data.channels.map((ch: any) => ({

@@ -43,10 +43,16 @@ const Briefing = () => {
   const resolveFollowup = useResolveFollowup();
   const sendReminder = useSendReminder();
 
-  // Auto-analyze when new Slack messages arrive
+  // Auto-analyze when new Slack messages arrive (with dedup fingerprint)
+  const lastAnalyzedFingerprint = useRef<string>('');
   useEffect(() => {
     if (slackMessages.length > 0 && selectedChannel && !analyzeMutation.isPending) {
-      analyzeMutation.mutate(slackMessages);
+      // Create a fingerprint from message timestamps to avoid redundant calls
+      const fingerprint = `${selectedChannel}:${slackMessages.map(m => m.timestamp).sort().join(',')}`;
+      if (fingerprint !== lastAnalyzedFingerprint.current) {
+        lastAnalyzedFingerprint.current = fingerprint;
+        analyzeMutation.mutate(slackMessages);
+      }
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [slackMessages, selectedChannel]);

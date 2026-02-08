@@ -23,7 +23,6 @@ import { Button } from '@/components/ui/button';
 const Briefing = () => {
   const { providerToken } = useAuth();
   const [selectedChannel, setSelectedChannel] = useState<string | null>(null);
-  const [dismissedSlackTs, setDismissedSlackTs] = useState<Set<string>>(new Set());
   const [dismissedGmailIds, setDismissedGmailIds] = useState<Set<string>>(new Set());
   const [dismissedAnalyzedIds, setDismissedAnalyzedIds] = useState<Set<string>>(new Set());
 

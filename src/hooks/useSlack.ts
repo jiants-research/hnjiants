@@ -14,6 +14,7 @@ export interface SlackMessage {
   original_message: string;
   timestamp: string;
   channel: string;
+  thread_ts: string | null;
 }
 
 export const useSlackChannels = () => {

@@ -352,17 +352,6 @@ Keep nudges to 1-2 sentences. Use the person's first name when available.`,
   }
 });
 
-// ── Helper: Follow-up delay based on urgency ──
-function getFollowupDelay(urgency: string): number {
-  switch (urgency) {
-    case "critical": return 4 * 60 * 60 * 1000;       // 4 hours
-    case "high": return 24 * 60 * 60 * 1000;           // 1 day
-    case "medium": return 2 * 24 * 60 * 60 * 1000;     // 2 days
-    case "low": return 5 * 24 * 60 * 60 * 1000;        // 5 days
-    default: return 2 * 24 * 60 * 60 * 1000;
-  }
-}
-
 // ── Helper: Group flat messages into conversation units ──
 function groupByThread(messages: SlackMessageInput[]): ConversationUnit[] {
   const threadMap = new Map<string, SlackMessageInput[]>();

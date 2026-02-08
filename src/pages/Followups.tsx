@@ -167,7 +167,7 @@ const Followups = () => {
                   onSendReminder={() => handleSendReminder(f.id)}
                   isResolving={resolveFollowup.isPending}
                   isSending={sendReminder.isPending}
-                  showActions={false}
+                  showActions
                 />
               ))}
             </AnimatePresence>

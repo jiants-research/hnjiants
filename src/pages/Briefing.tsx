@@ -85,7 +85,7 @@ const Briefing = () => {
       // 2. Mark nudge as sent in DB (persistence fix)
       await markNudgeSent.mutateAsync(item.id);
 
-      // 3. Create follow-up with urgency-based delay
+      // 3. Create follow-up with AI-extracted deadline or urgency-based delay
       await createFollowup.mutateAsync({
         messageId: item.id,
         channelId: item.channel_id,
@@ -93,6 +93,7 @@ const Briefing = () => {
         taskSummary: item.task_summary || 'Follow up on task',
         assignee: item.assignee,
         urgency: item.urgency,
+        deadline: item.deadline,
       });
 
       toast.success('Nudge sent!', { description: 'Follow-up scheduled automatically.' });

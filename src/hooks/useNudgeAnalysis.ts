@@ -147,9 +147,23 @@ export const useCreateFollowup = () => {
       taskSummary: string;
       assignee: string | null;
       urgency: string;
+      deadline: string | null;
     }) => {
-      const delay = URGENCY_DELAYS[params.urgency] || URGENCY_DELAYS.medium;
-      const followupAt = new Date(Date.now() + delay).toISOString();
+      // Use AI-extracted deadline if available, otherwise fall back to urgency-based delay
+      let followupAt: string;
+      if (params.deadline) {
+        const parsedDeadline = new Date(params.deadline);
+        if (!isNaN(parsedDeadline.getTime()) && parsedDeadline > new Date()) {
+          followupAt = parsedDeadline.toISOString();
+        } else {
+          // Deadline is in the past or invalid — use urgency-based fallback
+          const delay = URGENCY_DELAYS[params.urgency] || URGENCY_DELAYS.medium;
+          followupAt = new Date(Date.now() + delay).toISOString();
+        }
+      } else {
+        const delay = URGENCY_DELAYS[params.urgency] || URGENCY_DELAYS.medium;
+        followupAt = new Date(Date.now() + delay).toISOString();
+      }
 
       const { data: { user } } = await supabase.auth.getUser();
       if (!user) throw new Error('Not authenticated');

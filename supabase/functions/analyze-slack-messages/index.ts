@@ -122,7 +122,7 @@ serve(async (req) => {
         "Content-Type": "application/json",
       },
       body: JSON.stringify({
-        model: "gpt-4o-mini",
+        model: "gpt-4o",
         messages: [
           {
             role: "system",
@@ -140,6 +140,7 @@ For each unit, determine:
    - "low": Nice-to-have, informational, no time pressure
 4. Identify the specific message (quote the exact text) that triggers the need for action/reply. This is the KEY message the CEO needs to see.
 5. Identify who owns or is assigned to the task.
+6. Extract the CONCRETE deadline or due time from the message context. Look for phrases like "by 12 PM", "before end of day", "within 2 hours", "by Friday", "tomorrow morning", etc. Convert these to an ISO 8601 datetime string (e.g. "2026-02-08T12:00:00Z"). Use the current time (${now}) as reference to resolve relative times. If NO specific time is mentioned, return null.
 
 Return your analysis using the analyze_conversations function.`,
           },
@@ -165,7 +166,7 @@ Return your analysis using the analyze_conversations function.`,
                         index: { type: "number", description: "The conversation unit index" },
                         is_actionable: { type: "boolean", description: "True if requires CEO follow-up or action" },
                         task_summary: { type: "string", description: "Brief 1-line summary of what needs doing" },
-                        deadline: { type: "string", description: "Extracted deadline if any, or null" },
+                        deadline: { type: "string", description: "ISO 8601 datetime of the extracted deadline from the message context (e.g. '2026-02-08T12:00:00Z'). Must be a concrete time derived from the conversation. Return null if no specific time is mentioned." },
                         assignee: { type: "string", description: "Person responsible / task owner" },
                         urgency: { type: "string", enum: ["critical", "high", "medium", "low"], description: "Priority level for CEO" },
                         trigger_message: { type: "string", description: "The exact quote from the conversation that requires a response or action" },

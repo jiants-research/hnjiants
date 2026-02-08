@@ -2,6 +2,15 @@ import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { supabase } from '@/integrations/supabase/client';
 import type { SlackMessage } from '@/hooks/useSlack';
 
+export type UrgencyLevel = 'critical' | 'high' | 'medium' | 'low';
+
+const URGENCY_ORDER: Record<string, number> = {
+  critical: 0,
+  high: 1,
+  medium: 2,
+  low: 3,
+};
+
 export interface AnalyzedMessage {
   id: string;
   slack_message_ts: string;
@@ -14,6 +23,8 @@ export interface AnalyzedMessage {
   nudge_sent: boolean;
   nudge_sent_at: string | null;
   created_at: string;
+  urgency: UrgencyLevel;
+  trigger_message: string | null;
 }
 
 export interface NudgeFollowup {
@@ -24,6 +35,7 @@ export interface NudgeFollowup {
   assignee: string | null;
   followup_at: string;
   status: string;
+  urgency: UrgencyLevel;
   slack_processed_messages?: {
     employee_name: string | null;
     ai_nudge_draft: string | null;
@@ -67,7 +79,14 @@ export const useAnalyzedMessages = (channelId: string | null) => {
         .order('created_at', { ascending: false });
 
       if (error) throw error;
-      return (data || []) as AnalyzedMessage[];
+
+      // Sort by urgency (critical first) then by created_at
+      const messages = (data || []) as AnalyzedMessage[];
+      return messages.sort((a, b) => {
+        const urgencyDiff = (URGENCY_ORDER[a.urgency] ?? 2) - (URGENCY_ORDER[b.urgency] ?? 2);
+        if (urgencyDiff !== 0) return urgencyDiff;
+        return new Date(b.created_at).getTime() - new Date(a.created_at).getTime();
+      });
     },
     enabled: !!channelId,
   });
@@ -85,7 +104,7 @@ export const useNudgeFollowups = () => {
       if (data?.error) throw new Error(data.error);
       return (data.followups || []) as NudgeFollowup[];
     },
-    refetchInterval: 5 * 60 * 1000, // Check every 5 minutes
+    refetchInterval: 5 * 60 * 1000,
   });
 };
 

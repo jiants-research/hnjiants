@@ -69,10 +69,9 @@ serve(async (req) => {
 
     // ── Step 1: Group messages into conversation units ──
     const conversationUnits = groupByThread(messages);
-    console.log(`Grouped ${messages.length} messages into ${conversationUnits.length} conversation units (${conversationUnits.filter(u => u.type === 'thread').length} threads, ${conversationUnits.filter(u => u.type === 'standalone').length} standalone)`);
+    console.log(`Grouped ${messages.length} messages into ${conversationUnits.length} conversation units`);
 
     // ── Step 2: Dedup — check which conversation units are already processed ──
-    // Use the primary timestamp (thread_ts for threads, message ts for standalone) as the key
     const primaryTimestamps = conversationUnits.map(u => u.thread_ts || u.timestamps[0]);
     const { data: existing } = await supabase
       .from("slack_processed_messages")
@@ -106,10 +105,12 @@ serve(async (req) => {
       throw new Error("OPENAI_API_KEY is not configured");
     }
 
+    const now = new Date().toISOString();
     const unitsForAI = newUnits.map((u, i) => ({
       index: i,
       type: u.type,
       conversation: u.conversation_text,
+      latest_timestamp: u.timestamps[u.timestamps.length - 1],
     }));
 
     console.log(`Analyzing ${newUnits.length} new conversation units from channel ${channel_id}`);
@@ -125,16 +126,22 @@ serve(async (req) => {
         messages: [
           {
             role: "system",
-            content: `You are a workplace message analyzer. You will receive conversation units — each is either a single standalone message or a full thread conversation.
+            content: `You are a workplace message analyzer for a CEO/Manager. Current time: ${now}.
 
-For THREAD conversations, analyze the entire thread as a whole to determine:
-1. Whether the thread contains an explicit task, to-do, or request
-2. Whether there's a deadline (specific date/time) or a missing deliverable
-3. Whether the conversation indicates something unresolved or needs follow-up
+You will receive conversation units — each is either a single standalone message or a full thread conversation.
 
-For STANDALONE messages, analyze individually.
+For each unit, determine:
+1. Whether it contains an explicit task, request, deliverable, or unresolved question that requires the CEO's attention or a follow-up.
+2. If it's a THREAD, check if replies already resolved the request. If resolved, mark as NOT actionable.
+3. Assess urgency from the CEO's perspective:
+   - "critical": Blocking work, overdue deadlines, escalations, client-facing issues, things that need immediate action
+   - "high": Has a deadline within 48h, important decisions pending, people waiting
+   - "medium": Tasks with reasonable timelines, general follow-ups needed
+   - "low": Nice-to-have, informational, no time pressure
+4. Identify the specific message (quote the exact text) that triggers the need for action/reply. This is the KEY message the CEO needs to see.
+5. Identify who owns or is assigned to the task.
 
-Return your analysis using the analyze_conversations function. Every conversation unit must have a result.`,
+Return your analysis using the analyze_conversations function.`,
           },
           {
             role: "user",
@@ -156,12 +163,14 @@ Return your analysis using the analyze_conversations function. Every conversatio
                       type: "object",
                       properties: {
                         index: { type: "number", description: "The conversation unit index" },
-                        is_actionable: { type: "boolean", description: "True if the conversation contains a task, unresolved request, or deadline" },
-                        task_summary: { type: "string", description: "Brief summary of the task/request, or null" },
+                        is_actionable: { type: "boolean", description: "True if requires CEO follow-up or action" },
+                        task_summary: { type: "string", description: "Brief 1-line summary of what needs doing" },
                         deadline: { type: "string", description: "Extracted deadline if any, or null" },
-                        assignee: { type: "string", description: "Who the task is assigned to, or null" },
+                        assignee: { type: "string", description: "Person responsible / task owner" },
+                        urgency: { type: "string", enum: ["critical", "high", "medium", "low"], description: "Priority level for CEO" },
+                        trigger_message: { type: "string", description: "The exact quote from the conversation that requires a response or action" },
                       },
-                      required: ["index", "is_actionable"],
+                      required: ["index", "is_actionable", "urgency"],
                       additionalProperties: false,
                     },
                   },
@@ -234,6 +243,7 @@ Keep nudges to 1-2 sentences. Use the person's first name when available.`,
                     sender: unit?.primary_sender,
                     task: a.task_summary,
                     deadline: a.deadline,
+                    urgency: a.urgency,
                     conversation: unit?.conversation_text,
                   };
                 })
@@ -290,7 +300,7 @@ Keep nudges to 1-2 sentences. Use the person's first name when available.`,
 
     // ── Step 5: Store results — one record per conversation unit ──
     const records = newUnits.map((unit, i) => {
-      const analysis = analyses.find((a: any) => a.index === i) || { is_actionable: false };
+      const analysis = analyses.find((a: any) => a.index === i) || { is_actionable: false, urgency: "medium" };
       const primaryTs = unit.thread_ts || unit.timestamps[0];
       return {
         slack_message_ts: primaryTs,
@@ -299,6 +309,8 @@ Keep nudges to 1-2 sentences. Use the person's first name when available.`,
         task_summary: (analysis as any).task_summary || null,
         deadline: (analysis as any).deadline || null,
         assignee: (analysis as any).assignee || null,
+        urgency: (analysis as any).urgency || "medium",
+        trigger_message: (analysis as any).trigger_message || null,
         ai_nudge_draft: nudgeDrafts[i] || null,
         user_id: user.id,
       };
@@ -334,7 +346,8 @@ Keep nudges to 1-2 sentences. Use the person's first name when available.`,
             slack_message_ts: r.slack_message_ts,
             task_summary: r.task_summary || "Follow up on task",
             assignee: r.assignee,
-            followup_at: new Date(Date.now() + 2 * 24 * 60 * 60 * 1000).toISOString(),
+            urgency: r.urgency,
+            followup_at: new Date(Date.now() + getFollowupDelay(r.urgency)).toISOString(),
             user_id: user.id,
             status: "pending",
           }));
@@ -356,7 +369,7 @@ Keep nudges to 1-2 sentences. Use the person's first name when available.`,
       }
     }
 
-    // Return all actionable items for this channel
+    // Return all actionable items for this channel, sorted by urgency
     const { data: allActionable } = await supabase
       .from("slack_processed_messages")
       .select("*")
@@ -381,6 +394,17 @@ Keep nudges to 1-2 sentences. Use the person's first name when available.`,
     });
   }
 });
+
+// ── Helper: Follow-up delay based on urgency ──
+function getFollowupDelay(urgency: string): number {
+  switch (urgency) {
+    case "critical": return 4 * 60 * 60 * 1000;       // 4 hours
+    case "high": return 24 * 60 * 60 * 1000;           // 1 day
+    case "medium": return 2 * 24 * 60 * 60 * 1000;     // 2 days
+    case "low": return 5 * 24 * 60 * 60 * 1000;        // 5 days
+    default: return 2 * 24 * 60 * 60 * 1000;
+  }
+}
 
 // ── Helper: Group flat messages into conversation units ──
 function groupByThread(messages: SlackMessageInput[]): ConversationUnit[] {

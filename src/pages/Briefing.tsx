@@ -48,7 +48,6 @@ const Briefing = () => {
   const visibleAnalyzed = analyzedMessages.filter(
     (m) => !dismissedAnalyzedIds.has(m.id) && !m.nudge_sent
   );
-  const visibleSlack = slackMessages.filter((m) => !dismissedSlackTs.has(m.timestamp));
   const visibleGmail = gmailMessages.filter((m) => !dismissedGmailIds.has(m.id));
 
   const handleDismissAnalyzed = (id: string) => {

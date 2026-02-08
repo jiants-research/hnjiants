@@ -1,146 +1,132 @@
 
-
-# Integrating with Project Management Tools
+# Full Linear Integration — Bidirectional Sync
 
 ## Overview
 
-This plan adds a **universal task export** feature that lets you push AI-detected tasks or follow-ups directly into your project management tool of choice (Linear, Jira, Asana, or any tool with a webhook/API).
+This upgrades the Linear integration from a simple "create task" button to a **fully bidirectional sync**:
 
-The approach uses a **provider-based architecture** -- you configure your tool once in Settings, and then a "Create Task" button appears on every action card and follow-up card.
+1. **During Slack analysis**: The AI checks Linear for existing matching issues before creating new ones
+2. **Auto-create**: If no match is found, the task is automatically created in Linear (no manual button needed)
+3. **Resolve syncs back**: When the boss clicks "Resolved" on a follow-up, the corresponding Linear issue is also marked as Done
 
-## How It Works
+The Settings page is simplified to Linear-only since that's the only tool in use.
 
-1. Go to **Settings** and pick your PM tool (Linear, Jira, Asana, or Webhook)
-2. Enter your API token (stored securely as a backend secret)
-3. On any **Briefing card** or **Follow-up card**, click **"Create Task"**
-4. The task is created in your PM tool with the summary, assignee, urgency, and deadline pre-filled
-5. The card shows a linked badge so you know it's been exported
+---
 
-## Supported Tools
+## What Changes
 
-| Tool | API Type | What You Need |
-|------|----------|---------------|
-| **Linear** | GraphQL | API key from linear.app/settings/api |
-| **Jira** | REST | Email + API token + your Jira domain |
-| **Asana** | REST | Personal access token |
-| **Custom Webhook** | POST | Any webhook URL (works with Zapier, Make, n8n, etc.) |
+### 1. Slack Analysis Now Checks Linear First
 
-## User Experience
+When the `analyze-slack-messages` edge function detects actionable tasks, it will:
 
-### Settings Page (new "Integrations" section)
+- Query Linear's GraphQL API to search for existing issues matching the task summary (using title/text filter)
+- If a match is found, link the existing issue (store its ID + URL) instead of creating a duplicate
+- If no match is found, auto-create the issue in Linear immediately
 
-- Dropdown to select your PM tool
-- Input fields for credentials (varies per tool)
-- A "Test Connection" button to verify setup
-- Save button that stores credentials securely
+This means tasks are **automatically synced to Linear** as soon as they're detected — no manual "Create Task" button needed.
 
-### Briefing Page (AIActionCard)
+### 2. Resolving a Follow-up Closes the Linear Issue
 
-- New **"Create Task"** button alongside "Dismiss" and "Send Nudge"
-- After creation, shows a green "Linked" badge with the external task ID/URL
-- Task is pre-filled with: summary, assignee, urgency label, and deadline
+When clicking "Resolved" on any follow-up card:
 
-### Follow-ups Page (FollowupCard)
+- The `check-followups` edge function will look up the `external_task_id` on the follow-up (or its linked processed message)
+- If a Linear issue is linked, it calls Linear's `issueUpdate` mutation to move the issue to the team's "Done" workflow state
+- The workflow state ID for "Done" is fetched dynamically using the `workflowStates` query filtered by the team
 
-- New **"Create Task"** button in the action row
-- Same behavior -- exports the follow-up as a task to your PM tool
+### 3. Settings Simplified to Linear-Only
+
+Since we're operating exclusively with Linear:
+- Remove the multi-provider selector grid (Jira, Asana, Webhook options)
+- Show a clean, focused Linear configuration card with just API Key and Team ID fields
+- Keep the Test Connection and Disconnect functionality
+
+### 4. UI Updates
+
+- The `CreateTaskButton` on Briefing cards becomes a **status indicator** — it shows "Linked" badges automatically since tasks are auto-created during analysis
+- Follow-up cards show the linked Linear issue badge
+- The manual "Create Task" button remains as a fallback for edge cases where auto-creation was skipped
 
 ---
 
 ## Technical Details
 
-### 1. Database Changes
+### Edge Function: `analyze-slack-messages` (Modified)
 
-Add a new `integrations` table and an `external_task_id` column to existing tables:
+After the AI produces its analysis, a new step runs before storing results:
 
-```sql
--- Store PM tool configuration per user
-CREATE TABLE integrations (
-  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-  user_id UUID NOT NULL,
-  provider TEXT NOT NULL,        -- 'linear', 'jira', 'asana', 'webhook'
-  config JSONB DEFAULT '{}',     -- domain, project_id, team_id, etc. (non-secret)
-  created_at TIMESTAMPTZ DEFAULT now(),
-  updated_at TIMESTAMPTZ DEFAULT now()
-);
+1. Fetch the user's Linear integration config (API token + team_id) from the `integrations` table
+2. For each actionable item, search Linear for matching issues:
+   ```graphql
+   query {
+     issueSearch(query: "task summary text", first: 5) {
+       nodes { id identifier url title state { name } }
+     }
+   }
+   ```
+3. If a match is found (fuzzy title match above a confidence threshold), store the `external_task_id` and `external_task_url` on the processed message record
+4. If no match, create a new issue using the existing `createLinearIssue` logic (moved/shared from `create-external-task`)
+5. Store the new issue's ID and URL on the record
 
--- Add external task tracking to processed messages
-ALTER TABLE slack_processed_messages
-  ADD COLUMN external_task_id TEXT,
-  ADD COLUMN external_task_url TEXT;
+### Edge Function: `check-followups` (Modified)
 
--- Add external task tracking to follow-ups
-ALTER TABLE nudge_followups
-  ADD COLUMN external_task_id TEXT,
-  ADD COLUMN external_task_url TEXT;
-```
+The `resolve` action gains a new step:
 
-RLS policies will restrict integrations to the owning user.
+1. After marking the follow-up as "resolved" in the database, check if `external_task_id` exists
+2. If it does, fetch the user's Linear integration config
+3. Query Linear for the team's "Done" workflow state:
+   ```graphql
+   query {
+     workflowStates(filter: { team: { id: { eq: "TEAM_ID" } }, type: { eq: "completed" } }) {
+       nodes { id name }
+     }
+   }
+   ```
+4. Update the Linear issue to the Done state:
+   ```graphql
+   mutation {
+     issueUpdate(id: "ISSUE_ID", input: { stateId: "DONE_STATE_ID" }) {
+       success
+       issue { id state { name } }
+     }
+   }
+   ```
 
-API tokens/secrets are stored via backend secrets (not in the database).
+### Edge Function: `create-external-task` (Simplified)
 
-### 2. New Edge Function: `create-external-task`
+- Strip out Jira, Asana, and Webhook provider handlers
+- Keep only the Linear handler as the sole provider
+- Keep `test` action for the Settings page connection test
 
-A single edge function that handles all providers:
+### Component: `IntegrationSettings.tsx` (Simplified)
 
-- Reads the user's integration config from the `integrations` table
-- Reads the API token from backend secrets (keyed per user/provider)
-- Routes to the correct provider handler:
-  - **Linear**: GraphQL mutation to `issueCreate`
-  - **Jira**: REST POST to `/rest/api/3/issue`
-  - **Asana**: REST POST to `/api/1.0/tasks`
-  - **Webhook**: Simple POST with JSON payload
-- Returns the created task ID and URL
-- Updates `external_task_id` / `external_task_url` on the source record
+- Remove the 4-provider grid selector
+- Show a single, clean Linear configuration form:
+  - API Key input (password field)
+  - Team ID input
+  - Link to get Linear API key
+- Keep Save, Test Connection, and Disconnect buttons
 
-### 3. New Hook: `useIntegration`
+### Component: `AIActionCard.tsx` (Updated)
 
-```
-src/hooks/useIntegration.ts
-```
+- The `CreateTaskButton` now primarily serves as a status indicator showing the linked Linear issue
+- Since tasks are auto-created during analysis, most cards will already show a "Linked" badge with the Linear issue identifier (e.g., "ENG-42") that opens the issue in Linear when clicked
 
-- `useIntegration()` -- fetch user's current integration config
-- `useUpdateIntegration()` -- save/update integration settings
-- `useCreateExternalTask()` -- mutation to call the edge function
-- `useTestConnection()` -- verify credentials work
+### Hook: `useIntegration.ts` (Simplified)
 
-### 4. Updated Components
+- Remove multi-provider type — only `'linear'` provider
+- Keep the same query/mutation patterns
 
-**`src/components/AIActionCard.tsx`**
-- Add a "Create Task" icon button (e.g., a clipboard/external-link icon)
-- Show a "Linked" badge if `external_task_url` exists
-- Clicking opens the task in a new tab if already linked
+### File Summary
 
-**`src/pages/Followups.tsx` (FollowupCard)**
-- Same "Create Task" button added to the action row
-- Same linked badge behavior
+| File | Action | Description |
+|------|--------|-------------|
+| `supabase/functions/analyze-slack-messages/index.ts` | Edit | Add Linear search + auto-create after AI analysis |
+| `supabase/functions/check-followups/index.ts` | Edit | Add Linear issue completion on resolve |
+| `supabase/functions/create-external-task/index.ts` | Edit | Simplify to Linear-only, keep test action |
+| `src/components/IntegrationSettings.tsx` | Edit | Simplify to Linear-only form |
+| `src/hooks/useIntegration.ts` | Edit | Simplify types to Linear-only |
+| `src/components/CreateTaskButton.tsx` | Minor | No major changes — works as-is for status display |
 
-**`src/pages/Settings.tsx`**
-- New "Integrations" card section below "Default Slack Channel"
-- Provider selector dropdown
-- Dynamic fields based on provider:
-  - Linear: API key input
-  - Jira: domain, email, API token inputs
-  - Asana: personal access token input
-  - Webhook: URL input
-- "Test Connection" and "Save" buttons
+### No Database Changes Required
 
-### 5. File Summary
-
-| File | Action |
-|------|--------|
-| `supabase/functions/create-external-task/index.ts` | New -- edge function for all providers |
-| `src/hooks/useIntegration.ts` | New -- integration config + task creation hooks |
-| `src/components/AIActionCard.tsx` | Edit -- add "Create Task" button + linked badge |
-| `src/pages/Followups.tsx` | Edit -- add "Create Task" to FollowupCard |
-| `src/pages/Settings.tsx` | Edit -- add Integrations section |
-| `supabase/config.toml` | Edit -- register new edge function |
-| Database migration | New -- `integrations` table + columns on existing tables |
-
-### 6. Security
-
-- API tokens are stored as backend secrets, never in the database
-- The edge function authenticates the user before accessing their integration
-- RLS on the `integrations` table ensures users can only see their own config
-- External API calls happen server-side only (edge function), never from the browser
-
+The existing `integrations` table and `external_task_id`/`external_task_url` columns on `slack_processed_messages` and `nudge_followups` already support everything needed.

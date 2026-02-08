@@ -40,7 +40,6 @@ serve(async (req) => {
     const action = body.action || "list";
 
     if (action === "list") {
-      // Return pending followups that are due
       const { data: followups } = await supabase
         .from("nudge_followups")
         .select(`
@@ -70,11 +69,36 @@ serve(async (req) => {
         });
       }
 
+      // Get the followup to check for linked Linear issue
+      const { data: followup } = await supabase
+        .from("nudge_followups")
+        .select("*, slack_processed_messages:processed_message_id (external_task_id, external_task_url)")
+        .eq("id", followup_id)
+        .eq("user_id", user.id)
+        .single();
+
+      // Mark as resolved in DB
       await supabase
         .from("nudge_followups")
         .update({ status: "resolved" })
         .eq("id", followup_id)
         .eq("user_id", user.id);
+
+      // Resolve the linked Linear issue if one exists
+      if (followup) {
+        const externalTaskId = followup.external_task_id ||
+          (followup.slack_processed_messages as any)?.external_task_id;
+
+        if (externalTaskId && externalTaskId !== 'webhook') {
+          try {
+            await resolveLinearIssue(supabase, user.id, externalTaskId);
+            console.log(`[check-followups] Resolved Linear issue linked to followup ${followup_id}`);
+          } catch (err: any) {
+            console.error(`[check-followups] Failed to resolve Linear issue:`, err.message);
+            // Don't fail the resolve action if Linear update fails
+          }
+        }
+      }
 
       return new Response(JSON.stringify({ success: true }), {
         headers: { ...corsHeaders, "Content-Type": "application/json" },
@@ -90,7 +114,6 @@ serve(async (req) => {
         });
       }
 
-      // Get followup details
       const { data: followup } = await supabase
         .from("nudge_followups")
         .select("*")
@@ -182,3 +205,112 @@ serve(async (req) => {
     });
   }
 });
+
+// ── Linear: Resolve issue by moving to Done state ──
+
+async function resolveLinearIssue(supabase: any, userId: string, externalTaskId: string) {
+  // Fetch user's Linear integration
+  const { data: integration } = await supabase
+    .from("integrations")
+    .select("*")
+    .eq("user_id", userId)
+    .eq("provider", "linear")
+    .limit(1)
+    .maybeSingle();
+
+  if (!integration?.api_token) {
+    console.log("[Linear] No integration found, skipping resolve");
+    return;
+  }
+
+  const apiToken = integration.api_token as string;
+  const config = (integration.config || {}) as Record<string, string>;
+  const teamId = config.team_id;
+
+  if (!teamId) {
+    console.log("[Linear] No team_id configured, skipping resolve");
+    return;
+  }
+
+  // First, find the Linear issue by identifier to get its internal ID
+  const issueQuery = `
+    query FindIssue($identifier: String!) {
+      issueSearch(query: $identifier, first: 1) {
+        nodes { id identifier }
+      }
+    }
+  `;
+
+  const issueRes = await fetch("https://api.linear.app/graphql", {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      "Authorization": apiToken,
+    },
+    body: JSON.stringify({ query: issueQuery, variables: { identifier: externalTaskId } }),
+  });
+
+  const issueData = await issueRes.json();
+  const issue = issueData.data?.issueSearch?.nodes?.[0];
+  if (!issue) {
+    console.log(`[Linear] Issue ${externalTaskId} not found, skipping resolve`);
+    return;
+  }
+
+  // Get the "Done" workflow state for this team
+  const statesQuery = `
+    query GetDoneState($teamId: String!) {
+      workflowStates(filter: { team: { id: { eq: $teamId } }, type: { eq: "completed" } }) {
+        nodes { id name }
+      }
+    }
+  `;
+
+  const statesRes = await fetch("https://api.linear.app/graphql", {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      "Authorization": apiToken,
+    },
+    body: JSON.stringify({ query: statesQuery, variables: { teamId } }),
+  });
+
+  const statesData = await statesRes.json();
+  const doneState = statesData.data?.workflowStates?.nodes?.[0];
+  if (!doneState) {
+    console.error("[Linear] Could not find 'completed' workflow state for team", teamId);
+    return;
+  }
+
+  // Update the issue to Done
+  const updateMutation = `
+    mutation UpdateIssue($id: String!, $input: IssueUpdateInput!) {
+      issueUpdate(id: $id, input: $input) {
+        success
+        issue { id state { name } }
+      }
+    }
+  `;
+
+  const updateRes = await fetch("https://api.linear.app/graphql", {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      "Authorization": apiToken,
+    },
+    body: JSON.stringify({
+      query: updateMutation,
+      variables: {
+        id: issue.id,
+        input: { stateId: doneState.id },
+      },
+    }),
+  });
+
+  const updateData = await updateRes.json();
+  if (updateData.errors) {
+    throw new Error(updateData.errors[0].message);
+  }
+
+  console.log(`[Linear] Issue ${externalTaskId} moved to "${doneState.name}" state`);
+}

@@ -48,7 +48,6 @@ Deno.serve(async (req) => {
     const body = await req.json() as TaskPayload & { action?: string };
     console.log('[create-external-task] Action:', body.action || 'create', 'User:', user.id);
 
-    // Use service role for DB operations
     const adminClient = createClient(supabaseUrl, supabaseServiceKey);
 
     // --- Test Connection Action ---
@@ -57,35 +56,36 @@ Deno.serve(async (req) => {
         .from('integrations')
         .select('*')
         .eq('user_id', user.id)
+        .eq('provider', 'linear')
         .limit(1)
         .maybeSingle();
 
       if (intError) throw intError;
       if (!integration) {
-        return new Response(JSON.stringify({ error: 'No integration configured' }), {
+        return new Response(JSON.stringify({ error: 'No Linear integration configured' }), {
           status: 400,
           headers: { ...corsHeaders, 'Content-Type': 'application/json' },
         });
       }
 
-      const result = await testConnection(integration.provider, integration.config, integration.api_token);
+      const result = await testLinearConnection(integration.api_token);
       return new Response(JSON.stringify(result), {
         headers: { ...corsHeaders, 'Content-Type': 'application/json' },
       });
     }
 
     // --- Create Task Action ---
-    // Fetch user's integration
     const { data: integration, error: intError } = await adminClient
       .from('integrations')
       .select('*')
       .eq('user_id', user.id)
+      .eq('provider', 'linear')
       .limit(1)
       .maybeSingle();
 
     if (intError) throw intError;
     if (!integration) {
-      return new Response(JSON.stringify({ error: 'No integration configured. Go to Settings to set one up.' }), {
+      return new Response(JSON.stringify({ error: 'No Linear integration configured. Go to Settings to set one up.' }), {
         status: 400,
         headers: { ...corsHeaders, 'Content-Type': 'application/json' },
       });
@@ -99,7 +99,16 @@ Deno.serve(async (req) => {
       });
     }
 
-    // Build task description
+    const apiToken = integration.api_token;
+    const config = integration.config as Record<string, string>;
+
+    if (!apiToken) {
+      return new Response(JSON.stringify({ error: 'Linear API token not configured' }), {
+        status: 400,
+        headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+      });
+    }
+
     const taskDescription = [
       description || '',
       assignee ? `Assigned to: ${assignee}` : '',
@@ -108,49 +117,13 @@ Deno.serve(async (req) => {
       `Source: Nudge Engine`,
     ].filter(Boolean).join('\n');
 
-    let externalTaskId: string | null = null;
-    let externalTaskUrl: string | null = null;
+    const result = await createLinearIssue(apiToken, config, title, taskDescription, urgency);
 
-    const provider = integration.provider;
-    const config = integration.config as Record<string, string>;
-    const apiToken = integration.api_token;
-
-    if (!apiToken) {
-      return new Response(JSON.stringify({ error: 'API token not configured for this integration' }), {
-        status: 400,
-        headers: { ...corsHeaders, 'Content-Type': 'application/json' },
-      });
-    }
-
-    // --- Provider Handlers ---
-    if (provider === 'linear') {
-      const result = await createLinearIssue(apiToken, config, title, taskDescription, urgency);
-      externalTaskId = result.id;
-      externalTaskUrl = result.url;
-    } else if (provider === 'jira') {
-      const result = await createJiraIssue(apiToken, config, title, taskDescription, urgency);
-      externalTaskId = result.id;
-      externalTaskUrl = result.url;
-    } else if (provider === 'asana') {
-      const result = await createAsanaTask(apiToken, config, title, taskDescription);
-      externalTaskId = result.id;
-      externalTaskUrl = result.url;
-    } else if (provider === 'webhook') {
-      const result = await sendWebhook(config, { title, description: taskDescription, assignee, urgency, deadline });
-      externalTaskId = 'webhook';
-      externalTaskUrl = null;
-    } else {
-      return new Response(JSON.stringify({ error: `Unknown provider: ${provider}` }), {
-        status: 400,
-        headers: { ...corsHeaders, 'Content-Type': 'application/json' },
-      });
-    }
-
-    // Update source record with external task info
+    // Update source record
     const table = source_type === 'processed_message' ? 'slack_processed_messages' : 'nudge_followups';
     const { error: updateError } = await adminClient
       .from(table)
-      .update({ external_task_id: externalTaskId, external_task_url: externalTaskUrl })
+      .update({ external_task_id: result.id, external_task_url: result.url })
       .eq('id', source_id)
       .eq('user_id', user.id);
 
@@ -158,12 +131,12 @@ Deno.serve(async (req) => {
       console.error('[create-external-task] Failed to update source record:', updateError);
     }
 
-    console.log('[create-external-task] Task created:', { provider, externalTaskId, externalTaskUrl });
+    console.log('[create-external-task] Linear issue created:', result);
 
     return new Response(JSON.stringify({
       success: true,
-      external_task_id: externalTaskId,
-      external_task_url: externalTaskUrl,
+      external_task_id: result.id,
+      external_task_url: result.url,
     }), {
       headers: { ...corsHeaders, 'Content-Type': 'application/json' },
     });
@@ -177,7 +150,7 @@ Deno.serve(async (req) => {
   }
 });
 
-// ── Provider Implementations ──
+// ── Linear Implementation ──
 
 async function createLinearIssue(
   apiToken: string,
@@ -223,139 +196,18 @@ async function createLinearIssue(
   return { id: issue.identifier, url: issue.url };
 }
 
-async function createJiraIssue(
-  apiToken: string,
-  config: Record<string, string>,
-  title: string,
-  description: string,
-  urgency?: string,
-) {
-  const domain = config.domain;
-  const projectKey = config.project_key;
-  const email = config.email;
-  if (!domain || !projectKey || !email) throw new Error('Jira domain, project_key, and email required');
-
-  const priorityMap: Record<string, string> = { critical: 'Highest', high: 'High', medium: 'Medium', low: 'Low' };
-
-  const res = await fetch(`https://${domain}/rest/api/3/issue`, {
-    method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-      'Authorization': `Basic ${btoa(`${email}:${apiToken}`)}`,
-    },
-    body: JSON.stringify({
-      fields: {
-        project: { key: projectKey },
-        summary: title,
-        description: {
-          type: 'doc',
-          version: 1,
-          content: [{ type: 'paragraph', content: [{ type: 'text', text: description }] }],
-        },
-        issuetype: { name: 'Task' },
-        priority: { name: priorityMap[urgency || 'medium'] || 'Medium' },
-      },
-    }),
-  });
-
-  const data = await res.json();
-  if (!res.ok) throw new Error(data.errorMessages?.join(', ') || 'Jira issue creation failed');
-
-  return { id: data.key, url: `https://${domain}/browse/${data.key}` };
-}
-
-async function createAsanaTask(
-  apiToken: string,
-  config: Record<string, string>,
-  title: string,
-  description: string,
-) {
-  const projectId = config.project_id;
-
-  const body: Record<string, any> = { name: title, notes: description };
-  if (projectId) body.projects = [projectId];
-
-  const res = await fetch('https://app.asana.com/api/1.0/tasks', {
-    method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-      'Authorization': `Bearer ${apiToken}`,
-    },
-    body: JSON.stringify({ data: body }),
-  });
-
-  const data = await res.json();
-  if (data.errors) throw new Error(data.errors[0].message);
-
-  const taskId = data.data.gid;
-  return { id: taskId, url: `https://app.asana.com/0/${projectId || '0'}/${taskId}` };
-}
-
-async function sendWebhook(
-  config: Record<string, string>,
-  payload: Record<string, any>,
-) {
-  const webhookUrl = config.webhook_url;
-  if (!webhookUrl) throw new Error('Webhook URL not configured');
-
-  const res = await fetch(webhookUrl, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify(payload),
-  });
-
-  if (!res.ok) {
-    const text = await res.text();
-    throw new Error(`Webhook failed (${res.status}): ${text}`);
-  }
-
-  return { id: 'webhook', url: null };
-}
-
-async function testConnection(
-  provider: string,
-  config: Record<string, string>,
-  apiToken: string | null,
-) {
+async function testLinearConnection(apiToken: string | null) {
   if (!apiToken) return { success: false, error: 'No API token configured' };
 
   try {
-    if (provider === 'linear') {
-      const res = await fetch('https://api.linear.app/graphql', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json', 'Authorization': apiToken },
-        body: JSON.stringify({ query: '{ viewer { id name } }' }),
-      });
-      const data = await res.json();
-      if (data.errors) return { success: false, error: data.errors[0].message };
-      return { success: true, user: data.data.viewer.name };
-    }
-
-    if (provider === 'jira') {
-      const { domain, email } = config;
-      if (!domain || !email) return { success: false, error: 'Missing domain or email' };
-      const res = await fetch(`https://${domain}/rest/api/3/myself`, {
-        headers: { 'Authorization': `Basic ${btoa(`${email}:${apiToken}`)}` },
-      });
-      if (!res.ok) return { success: false, error: `HTTP ${res.status}` };
-      const data = await res.json();
-      return { success: true, user: data.displayName };
-    }
-
-    if (provider === 'asana') {
-      const res = await fetch('https://app.asana.com/api/1.0/users/me', {
-        headers: { 'Authorization': `Bearer ${apiToken}` },
-      });
-      const data = await res.json();
-      if (data.errors) return { success: false, error: data.errors[0].message };
-      return { success: true, user: data.data.name };
-    }
-
-    if (provider === 'webhook') {
-      return { success: true, message: 'Webhook configured — will POST when a task is created' };
-    }
-
-    return { success: false, error: 'Unknown provider' };
+    const res = await fetch('https://api.linear.app/graphql', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'Authorization': apiToken },
+      body: JSON.stringify({ query: '{ viewer { id name } }' }),
+    });
+    const data = await res.json();
+    if (data.errors) return { success: false, error: data.errors[0].message };
+    return { success: true, user: data.data.viewer.name };
   } catch (err: any) {
     return { success: false, error: err.message };
   }

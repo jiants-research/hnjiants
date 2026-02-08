@@ -1,16 +1,9 @@
 import { useState, useEffect } from 'react';
-import { useIntegration, useSaveIntegration, useDeleteIntegration, useTestConnection, type IntegrationProvider } from '@/hooks/useIntegration';
+import { useIntegration, useSaveIntegration, useDeleteIntegration, useTestConnection } from '@/hooks/useIntegration';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { toast } from 'sonner';
-import { Link2, Check, Loader2, Trash2, Zap, ExternalLink } from 'lucide-react';
-
-const PROVIDERS: { value: IntegrationProvider; label: string; description: string }[] = [
-  { value: 'linear', label: 'Linear', description: 'GraphQL API — create issues automatically' },
-  { value: 'jira', label: 'Jira', description: 'REST API — create issues in your Jira project' },
-  { value: 'asana', label: 'Asana', description: 'REST API — create tasks in your workspace' },
-  { value: 'webhook', label: 'Custom Webhook', description: 'POST JSON to any URL (Zapier, Make, n8n)' },
-];
+import { Check, Loader2, Trash2, Zap, ExternalLink } from 'lucide-react';
 
 export const IntegrationSettings = () => {
   const { data: integration, isLoading } = useIntegration();
@@ -18,33 +11,30 @@ export const IntegrationSettings = () => {
   const deleteIntegration = useDeleteIntegration();
   const testConnection = useTestConnection();
 
-  const [provider, setProvider] = useState<IntegrationProvider>('linear');
   const [apiToken, setApiToken] = useState('');
-  const [config, setConfig] = useState<Record<string, string>>({});
+  const [teamId, setTeamId] = useState('');
 
-  // Sync form with existing integration
   useEffect(() => {
     if (integration) {
-      setProvider(integration.provider);
-      setConfig(integration.config || {});
       setApiToken(integration.api_token || '');
+      setTeamId((integration.config as Record<string, string>)?.team_id || '');
     }
   }, [integration]);
 
   const handleSave = () => {
-    if (!apiToken && provider !== 'webhook') {
-      toast.error('API token is required');
+    if (!apiToken) {
+      toast.error('API key is required');
       return;
     }
-    if (provider === 'webhook' && !config.webhook_url) {
-      toast.error('Webhook URL is required');
+    if (!teamId) {
+      toast.error('Team ID is required');
       return;
     }
 
     saveIntegration.mutate(
-      { provider, config, api_token: apiToken },
+      { config: { team_id: teamId }, api_token: apiToken },
       {
-        onSuccess: () => toast.success('Integration saved!'),
+        onSuccess: () => toast.success('Linear integration saved!'),
         onError: (err) => toast.error('Failed to save', { description: err.message }),
       }
     );
@@ -54,7 +44,7 @@ export const IntegrationSettings = () => {
     testConnection.mutate(undefined, {
       onSuccess: (result) => {
         if (result.success) {
-          toast.success('Connection successful!', { description: result.user || result.message });
+          toast.success('Connected to Linear!', { description: `Signed in as ${result.user}` });
         } else {
           toast.error('Connection failed', { description: result.error });
         }
@@ -67,9 +57,9 @@ export const IntegrationSettings = () => {
     if (!integration) return;
     deleteIntegration.mutate(integration.id, {
       onSuccess: () => {
-        toast.success('Integration removed');
+        toast.success('Linear disconnected');
         setApiToken('');
-        setConfig({});
+        setTeamId('');
       },
       onError: (err) => toast.error('Failed to remove', { description: err.message }),
     });
@@ -87,8 +77,10 @@ export const IntegrationSettings = () => {
     <div className="bg-card border border-border rounded-xl p-4 space-y-4">
       <div className="flex items-center justify-between">
         <h3 className="text-sm font-semibold text-foreground flex items-center gap-2">
-          <Link2 className="w-4 h-4 text-primary" />
-          Project Management
+          <svg className="w-4 h-4 text-primary" viewBox="0 0 100 100" fill="currentColor">
+            <path d="M2.76 67.81l29.43-29.43a2.46 2.46 0 0 0-3.48-3.48L0 63.53a49.52 49.52 0 0 0 2.76 4.28zM10.2 77.2l40.83-40.83a2.46 2.46 0 0 0-3.48-3.48L6.85 73.59a49.7 49.7 0 0 0 3.35 3.61zM19.77 84.86l42.69-42.69a2.46 2.46 0 0 0-3.48-3.48L16.28 81.39a49.86 49.86 0 0 0 3.49 3.47zM31.79 90.56l42.3-42.3a2.46 2.46 0 0 0-3.48-3.48l-42.34 42.3a49.82 49.82 0 0 0 3.52 3.48zM46.63 94.31l38.94-38.94a2.46 2.46 0 0 0-3.48-3.48L43.2 90.78a50.16 50.16 0 0 0 3.43 3.53zM64.77 95.83l26.81-26.81a2.46 2.46 0 0 0-3.48-3.48L61.3 92.34a49.52 49.52 0 0 0 3.47 3.49z" />
+          </svg>
+          Linear
         </h3>
         {integration && (
           <span className="text-[11px] bg-primary/10 text-primary px-2 py-0.5 rounded-full font-semibold flex items-center gap-1">
@@ -99,67 +91,40 @@ export const IntegrationSettings = () => {
       </div>
 
       <p className="text-xs text-muted-foreground">
-        Connect a PM tool to export tasks directly from your briefing.
+        Tasks are automatically synced to Linear during analysis. Resolving a follow-up also closes the Linear issue.
       </p>
 
-      {/* Provider Selector */}
-      <div className="grid grid-cols-2 gap-2">
-        {PROVIDERS.map((p) => (
-          <button
-            key={p.value}
-            onClick={() => {
-              setProvider(p.value);
-              setConfig({});
-              setApiToken('');
-            }}
-            className={`text-left px-3 py-2.5 rounded-lg text-xs transition-colors border ${
-              provider === p.value
-                ? 'bg-primary/10 text-primary border-primary/20'
-                : 'text-foreground hover:bg-secondary border-border'
-            }`}
-          >
-            <span className="font-semibold block">{p.label}</span>
-            <span className="text-muted-foreground text-[10px] leading-tight">{p.description}</span>
-          </button>
-        ))}
-      </div>
-
-      {/* Dynamic Config Fields */}
+      {/* Config Fields */}
       <div className="space-y-3">
-        {provider === 'linear' && (
-          <>
-            <ConfigInput label="API Key" value={apiToken} onChange={setApiToken} type="password" placeholder="lin_api_..." />
-            <ConfigInput label="Team ID" value={config.team_id || ''} onChange={(v) => setConfig({ ...config, team_id: v })} placeholder="e.g. abc123-..." />
-            <HelpLink href="https://linear.app/settings/api" text="Get your Linear API key" />
-          </>
-        )}
-
-        {provider === 'jira' && (
-          <>
-            <ConfigInput label="Jira Domain" value={config.domain || ''} onChange={(v) => setConfig({ ...config, domain: v })} placeholder="yourcompany.atlassian.net" />
-            <ConfigInput label="Email" value={config.email || ''} onChange={(v) => setConfig({ ...config, email: v })} placeholder="you@company.com" />
-            <ConfigInput label="API Token" value={apiToken} onChange={setApiToken} type="password" placeholder="Your Jira API token" />
-            <ConfigInput label="Project Key" value={config.project_key || ''} onChange={(v) => setConfig({ ...config, project_key: v })} placeholder="e.g. PROJ" />
-            <HelpLink href="https://id.atlassian.com/manage-profile/security/api-tokens" text="Create a Jira API token" />
-          </>
-        )}
-
-        {provider === 'asana' && (
-          <>
-            <ConfigInput label="Personal Access Token" value={apiToken} onChange={setApiToken} type="password" placeholder="Your Asana PAT" />
-            <ConfigInput label="Project ID (optional)" value={config.project_id || ''} onChange={(v) => setConfig({ ...config, project_id: v })} placeholder="e.g. 1234567890" />
-            <HelpLink href="https://developers.asana.com/docs/personal-access-token" text="Create an Asana PAT" />
-          </>
-        )}
-
-        {provider === 'webhook' && (
-          <>
-            <ConfigInput label="Webhook URL" value={config.webhook_url || ''} onChange={(v) => setConfig({ ...config, webhook_url: v })} placeholder="https://hooks.zapier.com/..." />
-            <p className="text-[10px] text-muted-foreground">
-              Tasks will be POSTed as JSON with title, description, assignee, urgency, and deadline fields.
-            </p>
-          </>
-        )}
+        <div className="space-y-1">
+          <label className="text-[11px] text-muted-foreground uppercase tracking-widest font-semibold">API Key</label>
+          <Input
+            type="password"
+            value={apiToken}
+            onChange={(e) => setApiToken(e.target.value)}
+            placeholder="lin_api_..."
+            className="h-9 text-xs bg-input border-border"
+          />
+        </div>
+        <div className="space-y-1">
+          <label className="text-[11px] text-muted-foreground uppercase tracking-widest font-semibold">Team ID</label>
+          <Input
+            type="text"
+            value={teamId}
+            onChange={(e) => setTeamId(e.target.value)}
+            placeholder="e.g. abc123-..."
+            className="h-9 text-xs bg-input border-border"
+          />
+        </div>
+        <a
+          href="https://linear.app/settings/api"
+          target="_blank"
+          rel="noopener noreferrer"
+          className="inline-flex items-center gap-1 text-[11px] text-primary hover:underline"
+        >
+          <ExternalLink className="w-3 h-3" />
+          Get your Linear API key
+        </a>
       </div>
 
       {/* Actions */}
@@ -197,40 +162,3 @@ export const IntegrationSettings = () => {
     </div>
   );
 };
-
-const ConfigInput = ({
-  label,
-  value,
-  onChange,
-  placeholder,
-  type = 'text',
-}: {
-  label: string;
-  value: string;
-  onChange: (v: string) => void;
-  placeholder?: string;
-  type?: string;
-}) => (
-  <div className="space-y-1">
-    <label className="text-[11px] text-muted-foreground uppercase tracking-widest font-semibold">{label}</label>
-    <Input
-      type={type}
-      value={value}
-      onChange={(e) => onChange(e.target.value)}
-      placeholder={placeholder}
-      className="h-9 text-xs bg-input border-border"
-    />
-  </div>
-);
-
-const HelpLink = ({ href, text }: { href: string; text: string }) => (
-  <a
-    href={href}
-    target="_blank"
-    rel="noopener noreferrer"
-    className="inline-flex items-center gap-1 text-[11px] text-primary hover:underline"
-  >
-    <ExternalLink className="w-3 h-3" />
-    {text}
-  </a>
-);

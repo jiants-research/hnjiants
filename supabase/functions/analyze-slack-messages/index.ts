@@ -299,10 +299,61 @@ Keep nudges to 1-2 sentences. Use the person's first name when available.`,
       }
     }
 
-    // ── Step 5: Store results — one record per conversation unit ──
+    // ── Step 5: Linear integration — search or auto-create issues ──
+    const { data: linearIntegration } = await supabase
+      .from("integrations")
+      .select("*")
+      .eq("user_id", user.id)
+      .eq("provider", "linear")
+      .limit(1)
+      .maybeSingle();
+
+    const linearResults: Record<number, { external_task_id: string; external_task_url: string }> = {};
+
+    if (linearIntegration?.api_token) {
+      const apiToken = linearIntegration.api_token as string;
+      const config = (linearIntegration.config || {}) as Record<string, string>;
+      const teamId = config.team_id;
+
+      if (teamId) {
+        for (const analysis of actionableAnalyses) {
+          const taskSummary = analysis.task_summary || '';
+          if (!taskSummary) continue;
+
+          try {
+            // Search Linear for existing matching issues
+            const searchResult = await searchLinearIssues(apiToken, taskSummary);
+
+            if (searchResult) {
+              // Found existing issue — link it
+              console.log(`[Linear] Matched existing issue ${searchResult.identifier} for: "${taskSummary}"`);
+              linearResults[analysis.index] = {
+                external_task_id: searchResult.identifier,
+                external_task_url: searchResult.url,
+              };
+            } else {
+              // No match — auto-create
+              const created = await createLinearIssue(apiToken, teamId, taskSummary, analysis);
+              console.log(`[Linear] Created issue ${created.identifier} for: "${taskSummary}"`);
+              linearResults[analysis.index] = {
+                external_task_id: created.identifier,
+                external_task_url: created.url,
+              };
+            }
+          } catch (err: any) {
+            console.error(`[Linear] Failed to sync issue for index ${analysis.index}:`, err.message);
+          }
+        }
+      } else {
+        console.log("[Linear] Integration found but no team_id configured, skipping sync");
+      }
+    }
+
+    // ── Step 6: Store results — one record per conversation unit ──
     const records = newUnits.map((unit, i) => {
       const analysis = analyses.find((a: any) => a.index === i) || { is_actionable: false, urgency: "medium" };
       const primaryTs = unit.thread_ts || unit.timestamps[0];
+      const linear = linearResults[i];
       return {
         slack_message_ts: primaryTs,
         channel_id,
@@ -314,6 +365,8 @@ Keep nudges to 1-2 sentences. Use the person's first name when available.`,
         trigger_message: (analysis as any).trigger_message || null,
         ai_nudge_draft: nudgeDrafts[i] || null,
         user_id: user.id,
+        external_task_id: linear?.external_task_id || null,
+        external_task_url: linear?.external_task_url || null,
       };
     });
 
@@ -325,9 +378,7 @@ Keep nudges to 1-2 sentences. Use the person's first name when available.`,
       console.error("Insert error:", insertError);
     }
 
-    // Follow-ups are now created on the frontend when user clicks "Send Nudge"
-
-    // Return all actionable items for this channel, sorted by urgency
+    // Return all actionable items for this channel
     const { data: allActionable } = await supabase
       .from("slack_processed_messages")
       .select("*")
@@ -353,6 +404,105 @@ Keep nudges to 1-2 sentences. Use the person's first name when available.`,
   }
 });
 
+// ── Linear helpers ──
+
+async function searchLinearIssues(apiToken: string, query: string): Promise<{ id: string; identifier: string; url: string; title: string } | null> {
+  const searchQuery = `
+    query SearchIssues($query: String!) {
+      issueSearch(query: $query, first: 5) {
+        nodes {
+          id
+          identifier
+          url
+          title
+          state { name type }
+        }
+      }
+    }
+  `;
+
+  const res = await fetch("https://api.linear.app/graphql", {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      "Authorization": apiToken,
+    },
+    body: JSON.stringify({ query: searchQuery, variables: { query } }),
+  });
+
+  const data = await res.json();
+  if (data.errors) {
+    console.error("[Linear] Search error:", data.errors[0].message);
+    return null;
+  }
+
+  const nodes = data.data?.issueSearch?.nodes || [];
+  if (nodes.length === 0) return null;
+
+  // Find a close title match (case-insensitive substring match)
+  const queryLower = query.toLowerCase();
+  const match = nodes.find((n: any) => {
+    const titleLower = (n.title || '').toLowerCase();
+    // Check if titles share significant overlap
+    const queryWords = queryLower.split(/\s+/).filter((w: string) => w.length > 3);
+    const matchCount = queryWords.filter((w: string) => titleLower.includes(w)).length;
+    return matchCount >= Math.ceil(queryWords.length * 0.5);
+  });
+
+  if (match) {
+    return { id: match.id, identifier: match.identifier, url: match.url, title: match.title };
+  }
+
+  return null;
+}
+
+async function createLinearIssue(
+  apiToken: string,
+  teamId: string,
+  title: string,
+  analysis: any,
+): Promise<{ id: string; identifier: string; url: string }> {
+  const priorityMap: Record<string, number> = { critical: 1, high: 2, medium: 3, low: 4 };
+  const priority = priorityMap[analysis.urgency || 'medium'] || 3;
+
+  const description = [
+    analysis.trigger_message ? `> ${analysis.trigger_message}` : '',
+    analysis.assignee ? `**Assigned to:** ${analysis.assignee}` : '',
+    analysis.deadline ? `**Deadline:** ${analysis.deadline}` : '',
+    `\n_Auto-created by Nudge Engine_`,
+  ].filter(Boolean).join('\n');
+
+  const mutation = `
+    mutation CreateIssue($input: IssueCreateInput!) {
+      issueCreate(input: $input) {
+        success
+        issue { id identifier url }
+      }
+    }
+  `;
+
+  const res = await fetch("https://api.linear.app/graphql", {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      "Authorization": apiToken,
+    },
+    body: JSON.stringify({
+      query: mutation,
+      variables: {
+        input: { teamId, title, description, priority },
+      },
+    }),
+  });
+
+  const data = await res.json();
+  if (data.errors) throw new Error(data.errors[0].message);
+  if (!data.data?.issueCreate?.success) throw new Error('Linear issue creation failed');
+
+  const issue = data.data.issueCreate.issue;
+  return { id: issue.id, identifier: issue.identifier, url: issue.url };
+}
+
 // ── Helper: Group flat messages into conversation units ──
 function groupByThread(messages: SlackMessageInput[]): ConversationUnit[] {
   const threadMap = new Map<string, SlackMessageInput[]>();
@@ -371,7 +521,6 @@ function groupByThread(messages: SlackMessageInput[]): ConversationUnit[] {
   const units: ConversationUnit[] = [];
   let idx = 0;
 
-  // Standalone messages
   for (const msg of standalone) {
     units.push({
       index: idx++,
@@ -384,7 +533,6 @@ function groupByThread(messages: SlackMessageInput[]): ConversationUnit[] {
     });
   }
 
-  // Threaded conversations — sorted by timestamp
   for (const [threadTs, msgs] of threadMap) {
     const sorted = msgs.sort((a, b) => parseFloat(a.timestamp) - parseFloat(b.timestamp));
     const conversationText = sorted

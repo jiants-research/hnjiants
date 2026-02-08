@@ -1,12 +1,10 @@
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { supabase } from '@/integrations/supabase/client';
 
-export type IntegrationProvider = 'linear' | 'jira' | 'asana' | 'webhook';
-
 export interface Integration {
   id: string;
   user_id: string;
-  provider: IntegrationProvider;
+  provider: 'linear';
   config: Record<string, string>;
   api_token: string | null;
   created_at: string;
@@ -20,6 +18,7 @@ export const useIntegration = () => {
       const { data, error } = await supabase
         .from('integrations')
         .select('*')
+        .eq('provider', 'linear')
         .limit(1)
         .maybeSingle();
       if (error) throw error;
@@ -33,20 +32,18 @@ export const useSaveIntegration = () => {
 
   return useMutation({
     mutationFn: async (params: {
-      provider: IntegrationProvider;
       config: Record<string, string>;
       api_token: string;
     }) => {
       const { data: { user } } = await supabase.auth.getUser();
       if (!user) throw new Error('Not authenticated');
 
-      // Upsert by user_id + provider
       const { error } = await supabase
         .from('integrations')
         .upsert(
           {
             user_id: user.id,
-            provider: params.provider,
+            provider: 'linear',
             config: params.config,
             api_token: params.api_token,
           },

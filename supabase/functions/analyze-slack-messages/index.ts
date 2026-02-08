@@ -313,9 +313,18 @@ Keep nudges to 1-2 sentences. Use the person's first name when available.`,
     if (linearIntegration?.api_token) {
       const apiToken = linearIntegration.api_token as string;
       const config = (linearIntegration.config || {}) as Record<string, string>;
-      const teamId = config.team_id;
+      const rawTeamId = config.team_id;
 
-      if (teamId) {
+      if (rawTeamId) {
+        // Resolve team key (e.g. "HNJ") to UUID
+        let resolvedTeamId: string;
+        try {
+          resolvedTeamId = await resolveTeamId(apiToken, rawTeamId);
+        } catch (err: any) {
+          console.error("[Linear] Failed to resolve team ID:", err.message);
+          resolvedTeamId = rawTeamId; // fallback
+        }
+
         for (const analysis of actionableAnalyses) {
           const taskSummary = analysis.task_summary || '';
           if (!taskSummary) continue;
@@ -325,15 +334,13 @@ Keep nudges to 1-2 sentences. Use the person's first name when available.`,
             const searchResult = await searchLinearIssues(apiToken, taskSummary);
 
             if (searchResult) {
-              // Found existing issue — link it
               console.log(`[Linear] Matched existing issue ${searchResult.identifier} for: "${taskSummary}"`);
               linearResults[analysis.index] = {
                 external_task_id: searchResult.identifier,
                 external_task_url: searchResult.url,
               };
             } else {
-              // No match — auto-create
-              const created = await createLinearIssue(apiToken, teamId, taskSummary, analysis);
+              const created = await createLinearIssue(apiToken, resolvedTeamId, taskSummary, analysis);
               console.log(`[Linear] Created issue ${created.identifier} for: "${taskSummary}"`);
               linearResults[analysis.index] = {
                 external_task_id: created.identifier,

@@ -1,144 +1,146 @@
 
 
-# Fix Nudge Persistence, Real Team Pulse, Follow-up Logic, and User Settings
+# Integrating with Project Management Tools
 
-## 1. Fix: Nudges Reappearing After Refresh
+## Overview
 
-**Problem**: When you send a nudge, the card disappears (local state), but on page refresh the same messages reappear because `nudge_sent` is never updated in the database.
+This plan adds a **universal task export** feature that lets you push AI-detected tasks or follow-ups directly into your project management tool of choice (Linear, Jira, Asana, or any tool with a webhook/API).
 
-**Solution**: After successfully sending a nudge via Slack, immediately update the `slack_processed_messages` record to set `nudge_sent = true` and `nudge_sent_at = now()`. Then invalidate the React Query cache so the UI stays in sync.
+The approach uses a **provider-based architecture** -- you configure your tool once in Settings, and then a "Create Task" button appears on every action card and follow-up card.
 
-**Files to change**:
-- `src/pages/Briefing.tsx` — update `handleSendAINudge` to call a database update after sending, then invalidate the `analyzed-messages` query
-- `src/hooks/useNudgeAnalysis.ts` — add a `useMarkNudgeSent` mutation hook that updates the database record and invalidates relevant queries
+## How It Works
 
----
+1. Go to **Settings** and pick your PM tool (Linear, Jira, Asana, or Webhook)
+2. Enter your API token (stored securely as a backend secret)
+3. On any **Briefing card** or **Follow-up card**, click **"Create Task"**
+4. The task is created in your PM tool with the summary, assignee, urgency, and deadline pre-filled
+5. The card shows a linked badge so you know it's been exported
 
-## 2. Fix: Follow-ups Created Only on "Send Nudge"
+## Supported Tools
 
-**Problem**: Follow-up entries are currently created during the AI analysis step (before the user decides anything). The correct workflow is: AI identifies task, user reviews it, user clicks "Send Nudge", and only then is the follow-up scheduled.
+| Tool | API Type | What You Need |
+|------|----------|---------------|
+| **Linear** | GraphQL | API key from linear.app/settings/api |
+| **Jira** | REST | Email + API token + your Jira domain |
+| **Asana** | REST | Personal access token |
+| **Custom Webhook** | POST | Any webhook URL (works with Zapier, Make, n8n, etc.) |
 
-**Solution**:
-- Remove follow-up creation from the `analyze-slack-messages` Edge Function (Step 6)
-- Move follow-up creation into a new flow triggered when the user clicks "Send Nudge"
-- The follow-up timing is determined by the task's urgency level (critical: 4h, high: 1d, medium: 2d, low: 5d) — this logic stays the same but fires at the right moment
+## User Experience
 
-**Files to change**:
-- `supabase/functions/analyze-slack-messages/index.ts` — remove Step 6 (lines 327-369) that auto-creates follow-ups
-- `src/hooks/useNudgeAnalysis.ts` — create a `useCreateFollowup` mutation that inserts a follow-up record with the urgency-based delay
-- `src/pages/Briefing.tsx` — update `handleSendAINudge` to: (1) send Slack message, (2) mark nudge as sent in DB, (3) create follow-up entry, (4) invalidate queries
+### Settings Page (new "Integrations" section)
 
----
+- Dropdown to select your PM tool
+- Input fields for credentials (varies per tool)
+- A "Test Connection" button to verify setup
+- Save button that stores credentials securely
 
-## 3. Real Team Pulse Statistics
+### Briefing Page (AIActionCard)
 
-**Problem**: The Team Pulse page shows hardcoded mock data instead of real statistics from the database.
+- New **"Create Task"** button alongside "Dismiss" and "Send Nudge"
+- After creation, shows a green "Linked" badge with the external task ID/URL
+- Task is pre-filled with: summary, assignee, urgency label, and deadline
 
-**Solution**: Replace mock data with real queries against `slack_processed_messages` and `nudge_followups`. The leaderboard will aggregate data by assignee, counting open loops (actionable + not nudge_sent) and calculating a reliability score based on resolved vs total follow-ups.
+### Follow-ups Page (FollowupCard)
 
-**Files to change**:
-- `src/pages/TeamPulse.tsx` — replace `mockTeamMembers` import with a real database query hook
-- `src/hooks/useTeamPulse.ts` (new) — hook that queries `slack_processed_messages` and `nudge_followups` to compute per-assignee stats:
-  - Open loops = actionable messages where nudge has not been sent
-  - Total tasks = all actionable messages assigned to them
-  - Resolved count = follow-ups marked as resolved
-  - Reliability score = (resolved / total) * 100
-
----
-
-## 4. User Settings Page with Profile Picture
-
-**Problem**: There is no settings section, and the user's profile picture is not displayed anywhere.
-
-**Solution**: Create a new `/settings` route and page. Display the user's Google profile picture (from auth metadata `avatar_url`) or fall back to initials generated from their name/email. Also add a small avatar in the app header for quick access to settings.
-
-**Files to change**:
-- `src/pages/Settings.tsx` (new) — settings page showing:
-  - User avatar (Google picture or initials fallback)
-  - Full name and email
-  - Default channel preference
-  - Sign out button
-- `src/App.tsx` — add `/settings` route
-- `src/components/BottomNav.tsx` — add Settings nav item (or use the header avatar as a link)
-- `src/components/Layout.tsx` — replace the sign-out button with an avatar that links to settings
-- `src/hooks/useProfile.ts` (new) — hook to fetch and update the user's profile from the `profiles` table, including syncing `avatar_url` from Google auth metadata
-
----
-
-## 5. Database Cleanup
-
-Clear stale records created by the old auto-follow-up logic so the system starts fresh with the corrected workflow:
-- Delete all records from `nudge_followups`
-- Delete all records from `slack_processed_messages`
+- New **"Create Task"** button in the action row
+- Same behavior -- exports the follow-up as a task to your PM tool
 
 ---
 
 ## Technical Details
 
-### Updated Nudge Flow (Steps 2 + 1 combined)
+### 1. Database Changes
 
-```text
-AI Analysis (Edge Function)           User Action (Frontend)
-+--------------------------+          +----------------------------+
-| 1. Group messages        |          | 1. User clicks "Send      |
-| 2. Deduplicate           |          |    Nudge"                  |
-| 3. Analyze with OpenAI   |          | 2. Send Slack message      |
-| 4. Generate nudge drafts |          | 3. Update DB: nudge_sent   |
-| 5. Store in DB           |          |    = true                  |
-|    (NO follow-up created)|          | 4. Create follow-up with   |
-+--------------------------+          |    urgency-based delay     |
-                                      | 5. Invalidate queries      |
-                                      +----------------------------+
-```
-
-### Team Pulse Query Logic
+Add a new `integrations` table and an `external_task_id` column to existing tables:
 
 ```sql
--- Per-assignee stats from slack_processed_messages
-SELECT 
-  assignee,
-  COUNT(*) FILTER (WHERE is_actionable) as total_tasks,
-  COUNT(*) FILTER (WHERE is_actionable AND NOT nudge_sent) as open_loops
-FROM slack_processed_messages
-WHERE user_id = :current_user
-GROUP BY assignee;
+-- Store PM tool configuration per user
+CREATE TABLE integrations (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  user_id UUID NOT NULL,
+  provider TEXT NOT NULL,        -- 'linear', 'jira', 'asana', 'webhook'
+  config JSONB DEFAULT '{}',     -- domain, project_id, team_id, etc. (non-secret)
+  created_at TIMESTAMPTZ DEFAULT now(),
+  updated_at TIMESTAMPTZ DEFAULT now()
+);
 
--- Per-assignee resolved count from nudge_followups  
-SELECT 
-  assignee,
-  COUNT(*) FILTER (WHERE status = 'resolved') as resolved_count,
-  COUNT(*) as total_followups
-FROM nudge_followups
-WHERE user_id = :current_user
-GROUP BY assignee;
+-- Add external task tracking to processed messages
+ALTER TABLE slack_processed_messages
+  ADD COLUMN external_task_id TEXT,
+  ADD COLUMN external_task_url TEXT;
+
+-- Add external task tracking to follow-ups
+ALTER TABLE nudge_followups
+  ADD COLUMN external_task_id TEXT,
+  ADD COLUMN external_task_url TEXT;
 ```
 
-### Profile Avatar Logic
+RLS policies will restrict integrations to the owning user.
 
-```text
-1. Check user.user_metadata.avatar_url (set by Google OAuth)
-2. If available -> display as image
-3. If not -> generate initials from full_name or email
-4. Sync avatar_url to profiles table on login
+API tokens/secrets are stored via backend secrets (not in the database).
+
+### 2. New Edge Function: `create-external-task`
+
+A single edge function that handles all providers:
+
+- Reads the user's integration config from the `integrations` table
+- Reads the API token from backend secrets (keyed per user/provider)
+- Routes to the correct provider handler:
+  - **Linear**: GraphQL mutation to `issueCreate`
+  - **Jira**: REST POST to `/rest/api/3/issue`
+  - **Asana**: REST POST to `/api/1.0/tasks`
+  - **Webhook**: Simple POST with JSON payload
+- Returns the created task ID and URL
+- Updates `external_task_id` / `external_task_url` on the source record
+
+### 3. New Hook: `useIntegration`
+
+```
+src/hooks/useIntegration.ts
 ```
 
-### New Files Summary
+- `useIntegration()` -- fetch user's current integration config
+- `useUpdateIntegration()` -- save/update integration settings
+- `useCreateExternalTask()` -- mutation to call the edge function
+- `useTestConnection()` -- verify credentials work
 
-| File | Purpose |
-|------|---------|
-| `src/hooks/useTeamPulse.ts` | Real team stats from DB |
-| `src/hooks/useProfile.ts` | User profile data + avatar |
-| `src/pages/Settings.tsx` | User settings page |
+### 4. Updated Components
 
-### Modified Files Summary
+**`src/components/AIActionCard.tsx`**
+- Add a "Create Task" icon button (e.g., a clipboard/external-link icon)
+- Show a "Linked" badge if `external_task_url` exists
+- Clicking opens the task in a new tab if already linked
 
-| File | Changes |
-|------|---------|
-| `src/pages/Briefing.tsx` | Fix nudge send flow (mark sent + create follow-up) |
-| `src/hooks/useNudgeAnalysis.ts` | Add `useMarkNudgeSent` and `useCreateFollowup` mutations |
-| `src/pages/TeamPulse.tsx` | Replace mock data with real queries |
-| `src/components/Layout.tsx` | Add user avatar in header |
-| `src/components/BottomNav.tsx` | Add Settings nav item |
-| `src/App.tsx` | Add `/settings` route |
-| `supabase/functions/analyze-slack-messages/index.ts` | Remove auto follow-up creation |
+**`src/pages/Followups.tsx` (FollowupCard)**
+- Same "Create Task" button added to the action row
+- Same linked badge behavior
+
+**`src/pages/Settings.tsx`**
+- New "Integrations" card section below "Default Slack Channel"
+- Provider selector dropdown
+- Dynamic fields based on provider:
+  - Linear: API key input
+  - Jira: domain, email, API token inputs
+  - Asana: personal access token input
+  - Webhook: URL input
+- "Test Connection" and "Save" buttons
+
+### 5. File Summary
+
+| File | Action |
+|------|--------|
+| `supabase/functions/create-external-task/index.ts` | New -- edge function for all providers |
+| `src/hooks/useIntegration.ts` | New -- integration config + task creation hooks |
+| `src/components/AIActionCard.tsx` | Edit -- add "Create Task" button + linked badge |
+| `src/pages/Followups.tsx` | Edit -- add "Create Task" to FollowupCard |
+| `src/pages/Settings.tsx` | Edit -- add Integrations section |
+| `supabase/config.toml` | Edit -- register new edge function |
+| Database migration | New -- `integrations` table + columns on existing tables |
+
+### 6. Security
+
+- API tokens are stored as backend secrets, never in the database
+- The edge function authenticates the user before accessing their integration
+- RLS on the `integrations` table ensures users can only see their own config
+- External API calls happen server-side only (edge function), never from the browser
 

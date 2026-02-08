@@ -177,9 +177,9 @@ const Briefing = () => {
 
               {!slackLoading && visibleAnalyzed.length === 0 && !analyzeMutation.isPending && (
                 <EmptyState
-                  icon={<MessageSquare className="w-7 h-7 text-primary" />}
-                  title="No messages"
-                  subtitle="This channel has no recent messages."
+                  icon={<Brain className="w-7 h-7 text-primary" />}
+                  title="No actionable tasks"
+                  subtitle="No tasks or follow-ups detected in this channel."
                 />
               )}
             </>

@@ -16,14 +16,17 @@ import { AIActionCard } from '@/components/AIActionCard';
 import { FollowupBanner } from '@/components/FollowupBanner';
 import { GmailCard } from '@/components/GmailCard';
 import { toast } from 'sonner';
-import { Activity, Brain, Loader2, Mail, Hash } from 'lucide-react';
+import { Activity, Brain, ChevronDown, Loader2, Mail, Hash } from 'lucide-react';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
+import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '@/components/ui/collapsible';
+import { useSlackChannels } from '@/hooks/useSlack';
 
 const Briefing = () => {
   const { providerToken } = useAuth();
   const [selectedChannel, setSelectedChannel] = useState<string | null>(null);
   const [dismissedGmailIds, setDismissedGmailIds] = useState<Set<string>>(new Set());
   const [dismissedAnalyzedIds, setDismissedAnalyzedIds] = useState<Set<string>>(new Set());
+  const [channelsOpen, setChannelsOpen] = useState(false);
 
   // Auto-select default channel
   const { data: defaultChannelId } = useDefaultChannel();
@@ -32,6 +35,9 @@ const Briefing = () => {
       setSelectedChannel(defaultChannelId);
     }
   }, [defaultChannelId, selectedChannel]);
+
+  const { data: channels = [] } = useSlackChannels();
+  const selectedChannelName = channels.find((c) => c.id === selectedChannel)?.name;
 
   const { data: slackMessages = [], isLoading: slackLoading } = useSlackMessages(selectedChannel);
   const { data: gmailMessages = [], isLoading: gmailLoading } = useGmailMessages(providerToken);
@@ -47,7 +53,6 @@ const Briefing = () => {
   const lastAnalyzedFingerprint = useRef<string>('');
   useEffect(() => {
     if (slackMessages.length > 0 && selectedChannel && !analyzeMutation.isPending) {
-      // Create a fingerprint from message timestamps to avoid redundant calls
       const fingerprint = `${selectedChannel}:${slackMessages.map(m => m.timestamp).sort().join(',')}`;
       if (fingerprint !== lastAnalyzedFingerprint.current) {
         lastAnalyzedFingerprint.current = fingerprint;
@@ -57,6 +62,7 @@ const Briefing = () => {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [slackMessages, selectedChannel]);
 
+  // Already sorted by urgency from the hook
   const visibleAnalyzed = analyzedMessages.filter(
     (m) => !dismissedAnalyzedIds.has(m.id) && !m.nudge_sent
   );
@@ -70,18 +76,13 @@ const Briefing = () => {
   const handleSendAINudge = async (item: typeof analyzedMessages[0], nudgeText: string) => {
     try {
       await sendSlackNudge(item.channel_id, nudgeText, item.slack_message_ts);
-      // Dismiss the card immediately after sending
       setDismissedAnalyzedIds((prev) => new Set(prev).add(item.id));
       toast.success('AI nudge sent!', { description: 'Reply sent as thread.' });
-      // Refresh data
       analyzeMutation.mutate(slackMessages);
     } catch (err: any) {
       toast.error('Failed to send nudge', { description: err.message });
     }
   };
-
-
-
 
   const handleDismissGmail = (id: string) => {
     setDismissedGmailIds((prev) => new Set(prev).add(id));
@@ -108,7 +109,7 @@ const Briefing = () => {
       <div className="space-y-1.5">
         <h1 className="text-2xl font-bold text-foreground tracking-tight">Briefing</h1>
         <p className="text-sm text-muted-foreground">
-          AI-powered task detection &amp; nudges from Slack &amp; Gmail
+          AI-powered task detection — sorted by priority for you
         </p>
       </div>
 
@@ -150,7 +151,27 @@ const Briefing = () => {
 
         {/* Slack Tab */}
         <TabsContent value="slack" className="space-y-4 mt-4">
-          <ChannelSelector selectedChannel={selectedChannel} onSelect={setSelectedChannel} />
+          {/* Collapsible Channel Selector */}
+          <Collapsible open={channelsOpen} onOpenChange={setChannelsOpen}>
+            <CollapsibleTrigger className="w-full flex items-center justify-between bg-card border border-border rounded-xl px-4 py-3 text-sm font-medium text-foreground hover:bg-secondary/60 transition-colors">
+              <div className="flex items-center gap-2">
+                <Hash className="w-4 h-4 text-primary" />
+                {selectedChannel && selectedChannelName
+                  ? `#${selectedChannelName}`
+                  : 'Select a channel'}
+              </div>
+              <ChevronDown className={`w-4 h-4 text-muted-foreground transition-transform duration-200 ${channelsOpen ? 'rotate-180' : ''}`} />
+            </CollapsibleTrigger>
+            <CollapsibleContent className="mt-2">
+              <ChannelSelector
+                selectedChannel={selectedChannel}
+                onSelect={(id) => {
+                  setSelectedChannel(id);
+                  setChannelsOpen(false);
+                }}
+              />
+            </CollapsibleContent>
+          </Collapsible>
 
           {selectedChannel && (
             <>
@@ -162,12 +183,12 @@ const Briefing = () => {
                 </div>
               )}
 
-              {/* AI-Detected Action Items */}
+              {/* AI-Detected Action Items — sorted by urgency */}
               {visibleAnalyzed.length > 0 && (
                 <div className="space-y-3">
                   <h2 className="text-sm font-semibold text-foreground flex items-center gap-2">
                     <Brain className="w-4 h-4 text-primary" />
-                    AI-Detected Tasks ({visibleAnalyzed.length})
+                    Priority Actions ({visibleAnalyzed.length})
                   </h2>
                   <AnimatePresence mode="popLayout">
                     {visibleAnalyzed.map((item, i) => (

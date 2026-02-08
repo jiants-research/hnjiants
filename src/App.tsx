@@ -8,6 +8,7 @@ import { ProtectedRoute } from "@/components/ProtectedRoute";
 import { Layout } from "@/components/Layout";
 import Briefing from "./pages/Briefing";
 import TeamPulse from "./pages/TeamPulse";
+import Followups from "./pages/Followups";
 import Auth from "./pages/Auth";
 import NotFound from "./pages/NotFound";
 
@@ -23,6 +24,7 @@ const App = () => (
           <Routes>
             <Route path="/auth" element={<Auth />} />
             <Route path="/" element={<ProtectedRoute><Layout><Briefing /></Layout></ProtectedRoute>} />
+            <Route path="/follow-ups" element={<ProtectedRoute><Layout><Followups /></Layout></ProtectedRoute>} />
             <Route path="/team-pulse" element={<ProtectedRoute><Layout><TeamPulse /></Layout></ProtectedRoute>} />
             <Route path="*" element={<NotFound />} />
           </Routes>

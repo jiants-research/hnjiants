@@ -1,8 +1,9 @@
 import { useLocation, useNavigate } from 'react-router-dom';
-import { Inbox, Users } from 'lucide-react';
+import { Inbox, Bell, Users } from 'lucide-react';
 
 const navItems = [
   { label: 'Briefing', icon: Inbox, path: '/' },
+  { label: 'Follow-ups', icon: Bell, path: '/follow-ups' },
   { label: 'Team Pulse', icon: Users, path: '/team-pulse' },
 ];
 

@@ -1,12 +1,22 @@
 import { ReactNode } from 'react';
 import { BottomNav } from '@/components/BottomNav';
-import { Zap } from 'lucide-react';
+import { Zap, LogOut } from 'lucide-react';
+import { useAuth } from '@/contexts/AuthContext';
+import { useNavigate } from 'react-router-dom';
 
 interface LayoutProps {
   children: ReactNode;
 }
 
 export const Layout = ({ children }: LayoutProps) => {
+  const { signOut } = useAuth();
+  const navigate = useNavigate();
+
+  const handleSignOut = async () => {
+    await signOut();
+    navigate('/auth', { replace: true });
+  };
+
   return (
     <div className="min-h-screen bg-background flex flex-col">
       {/* Header */}
@@ -21,6 +31,14 @@ export const Layout = ({ children }: LayoutProps) => {
           <span className="text-muted-foreground text-xs font-medium tracking-wider uppercase ml-1">
             Engine
           </span>
+          <div className="flex-1" />
+          <button
+            onClick={handleSignOut}
+            className="p-2 rounded-lg text-muted-foreground hover:text-foreground hover:bg-secondary transition-all"
+            aria-label="Sign out"
+          >
+            <LogOut className="w-4 h-4" />
+          </button>
         </div>
       </header>
 

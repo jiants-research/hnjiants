@@ -4,7 +4,9 @@ import { motion } from 'framer-motion';
 import { Clock, Hash, Send, X } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Textarea } from '@/components/ui/textarea';
-import type { OpenLoop } from '@/data/mockData';
+import type { Tables } from '@/integrations/supabase/types';
+
+type OpenLoop = Tables<'open_loops'>;
 
 interface NudgeCardProps {
   loop: OpenLoop;

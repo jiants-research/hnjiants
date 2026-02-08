@@ -1,28 +1,57 @@
 import { useState } from 'react';
 import { AnimatePresence } from 'framer-motion';
+import { useQuery } from '@tanstack/react-query';
 import { NudgeCard } from '@/components/NudgeCard';
-import { mockOpenLoops } from '@/data/mockData';
+import { supabase } from '@/integrations/supabase/client';
 import { toast } from 'sonner';
-import { Activity } from 'lucide-react';
+import { Activity, Loader2 } from 'lucide-react';
+import type { Tables } from '@/integrations/supabase/types';
+
+type OpenLoop = Tables<'open_loops'>;
 
 const Briefing = () => {
-  const [loops, setLoops] = useState(mockOpenLoops);
+  const [dismissedIds, setDismissedIds] = useState<Set<string>>(new Set());
 
-  const handleDismiss = (id: string) => {
-    setLoops((prev) => prev.filter((l) => l.id !== id));
-    toast('Loop dismissed', {
-      description: 'Removed from your briefing.',
-    });
+  const { data: loops = [], isLoading } = useQuery({
+    queryKey: ['open_loops'],
+    queryFn: async () => {
+      const { data, error } = await supabase
+        .from('open_loops')
+        .select('*')
+        .eq('dismissed', false)
+        .eq('nudge_sent', false)
+        .order('due_date', { ascending: true });
+
+      if (error) throw error;
+      return data as OpenLoop[];
+    },
+  });
+
+  const visibleLoops = loops.filter((l) => !dismissedIds.has(l.id));
+
+  const handleDismiss = async (id: string) => {
+    setDismissedIds((prev) => new Set(prev).add(id));
+    toast('Loop dismissed', { description: 'Removed from your briefing.' });
+
+    await supabase.from('open_loops').update({ dismissed: true }).eq('id', id);
   };
 
-  const handleSendNudge = (id: string, _message: string) => {
-    setLoops((prev) => prev.filter((l) => l.id !== id));
-    toast.success('Nudge sent!', {
-      description: 'Message delivered via Slack.',
-    });
+  const handleSendNudge = async (id: string, _message: string) => {
+    setDismissedIds((prev) => new Set(prev).add(id));
+    toast.success('Nudge sent!', { description: 'Message delivered via Slack.' });
+
+    await supabase.from('open_loops').update({ nudge_sent: true }).eq('id', id);
   };
 
-  const overdueCount = loops.filter((l) => l.status === 'overdue').length;
+  const overdueCount = visibleLoops.filter((l) => l.status === 'overdue').length;
+
+  if (isLoading) {
+    return (
+      <div className="flex items-center justify-center py-20">
+        <Loader2 className="w-6 h-6 text-primary animate-spin" />
+      </div>
+    );
+  }
 
   return (
     <div className="space-y-5">
@@ -33,7 +62,7 @@ const Briefing = () => {
         </h1>
         <div className="flex items-center gap-3 text-sm">
           <span className="text-muted-foreground">
-            {loops.length} open loop{loops.length !== 1 ? 's' : ''}
+            {visibleLoops.length} open loop{visibleLoops.length !== 1 ? 's' : ''}
           </span>
           {overdueCount > 0 && (
             <span className="inline-flex items-center gap-1.5 text-accent font-medium">
@@ -47,7 +76,7 @@ const Briefing = () => {
       {/* Card Feed */}
       <div className="space-y-4">
         <AnimatePresence mode="popLayout">
-          {loops.map((loop, i) => (
+          {visibleLoops.map((loop, i) => (
             <NudgeCard
               key={loop.id}
               loop={loop}
@@ -60,7 +89,7 @@ const Briefing = () => {
       </div>
 
       {/* Empty state */}
-      {loops.length === 0 && (
+      {visibleLoops.length === 0 && (
         <div className="text-center py-20 space-y-3 animate-fade-in">
           <div className="w-14 h-14 rounded-2xl bg-primary/10 flex items-center justify-center mx-auto">
             <Activity className="w-7 h-7 text-primary" />

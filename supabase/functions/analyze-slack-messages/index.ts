@@ -324,50 +324,7 @@ Keep nudges to 1-2 sentences. Use the person's first name when available.`,
       console.error("Insert error:", insertError);
     }
 
-    // ── Step 6: Create follow-up entries for actionable items ──
-    const actionableRecords = records.filter((r) => r.is_actionable);
-
-    if (actionableRecords.length > 0) {
-      const { data: insertedMsgs } = await supabase
-        .from("slack_processed_messages")
-        .select("id, slack_message_ts")
-        .eq("channel_id", channel_id)
-        .eq("is_actionable", true)
-        .eq("user_id", user.id)
-        .in("slack_message_ts", actionableRecords.map((r) => r.slack_message_ts));
-
-      if (insertedMsgs) {
-        const tsToId = Object.fromEntries(insertedMsgs.map((m: any) => [m.slack_message_ts, m.id]));
-        const followupRecords = actionableRecords
-          .filter((r) => tsToId[r.slack_message_ts])
-          .map((r) => ({
-            processed_message_id: tsToId[r.slack_message_ts],
-            channel_id: r.channel_id,
-            slack_message_ts: r.slack_message_ts,
-            task_summary: r.task_summary || "Follow up on task",
-            assignee: r.assignee,
-            urgency: r.urgency,
-            followup_at: new Date(Date.now() + getFollowupDelay(r.urgency)).toISOString(),
-            user_id: user.id,
-            status: "pending",
-          }));
-
-        // Deduplicate against existing followups
-        const { data: existingFollowups } = await supabase
-          .from("nudge_followups")
-          .select("slack_message_ts")
-          .eq("channel_id", channel_id)
-          .in("slack_message_ts", followupRecords.map((r) => r.slack_message_ts));
-
-        const existingFollowupTs = new Set((existingFollowups || []).map((f: any) => f.slack_message_ts));
-        const newFollowups = followupRecords.filter((f) => !existingFollowupTs.has(f.slack_message_ts));
-
-        if (newFollowups.length > 0) {
-          await supabase.from("nudge_followups").insert(newFollowups);
-          console.log(`Created ${newFollowups.length} follow-up entries`);
-        }
-      }
-    }
+    // Follow-ups are now created on the frontend when user clicks "Send Nudge"
 
     // Return all actionable items for this channel, sorted by urgency
     const { data: allActionable } = await supabase

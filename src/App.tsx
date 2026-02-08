@@ -27,6 +27,7 @@ const App = () => (
             <Route path="/" element={<ProtectedRoute><Layout><Briefing /></Layout></ProtectedRoute>} />
             <Route path="/follow-ups" element={<ProtectedRoute><Layout><Followups /></Layout></ProtectedRoute>} />
             <Route path="/team-pulse" element={<ProtectedRoute><Layout><TeamPulse /></Layout></ProtectedRoute>} />
+            <Route path="/settings" element={<ProtectedRoute><Layout><Settings /></Layout></ProtectedRoute>} />
             <Route path="*" element={<NotFound />} />
           </Routes>
         </AuthProvider>

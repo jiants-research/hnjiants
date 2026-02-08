@@ -108,6 +108,75 @@ export const useNudgeFollowups = () => {
   });
 };
 
+// ── Mark a nudge as sent in the DB ──
+export const useMarkNudgeSent = () => {
+  const queryClient = useQueryClient();
+
+  return useMutation({
+    mutationFn: async (messageId: string) => {
+      const { error } = await supabase
+        .from('slack_processed_messages')
+        .update({ nudge_sent: true, nudge_sent_at: new Date().toISOString() })
+        .eq('id', messageId);
+
+      if (error) throw error;
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['analyzed-messages'] });
+      queryClient.invalidateQueries({ queryKey: ['team-pulse'] });
+    },
+  });
+};
+
+// ── Create a follow-up entry after sending a nudge ──
+const URGENCY_DELAYS: Record<string, number> = {
+  critical: 4 * 60 * 60 * 1000,      // 4 hours
+  high: 24 * 60 * 60 * 1000,          // 1 day
+  medium: 2 * 24 * 60 * 60 * 1000,    // 2 days
+  low: 5 * 24 * 60 * 60 * 1000,       // 5 days
+};
+
+export const useCreateFollowup = () => {
+  const queryClient = useQueryClient();
+
+  return useMutation({
+    mutationFn: async (params: {
+      messageId: string;
+      channelId: string;
+      slackMessageTs: string;
+      taskSummary: string;
+      assignee: string | null;
+      urgency: string;
+    }) => {
+      const delay = URGENCY_DELAYS[params.urgency] || URGENCY_DELAYS.medium;
+      const followupAt = new Date(Date.now() + delay).toISOString();
+
+      const { data: { user } } = await supabase.auth.getUser();
+      if (!user) throw new Error('Not authenticated');
+
+      const { error } = await supabase
+        .from('nudge_followups')
+        .insert({
+          processed_message_id: params.messageId,
+          channel_id: params.channelId,
+          slack_message_ts: params.slackMessageTs,
+          task_summary: params.taskSummary || 'Follow up on task',
+          assignee: params.assignee,
+          urgency: params.urgency,
+          followup_at: followupAt,
+          user_id: user.id,
+          status: 'pending',
+        });
+
+      if (error) throw error;
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['nudge-followups'] });
+      queryClient.invalidateQueries({ queryKey: ['team-pulse'] });
+    },
+  });
+};
+
 export const useResolveFollowup = () => {
   const queryClient = useQueryClient();
 
@@ -122,10 +191,10 @@ export const useResolveFollowup = () => {
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['nudge-followups'] });
+      queryClient.invalidateQueries({ queryKey: ['team-pulse'] });
     },
   });
 };
-
 export const useSendReminder = () => {
   const queryClient = useQueryClient();
 

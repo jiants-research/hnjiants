@@ -1,7 +1,9 @@
 import { ReactNode } from 'react';
 import { BottomNav } from '@/components/BottomNav';
-import { Zap, LogOut } from 'lucide-react';
+import { UserAvatar } from '@/components/UserAvatar';
+import { Zap } from 'lucide-react';
 import { useAuth } from '@/contexts/AuthContext';
+import { useProfile } from '@/hooks/useProfile';
 import { useNavigate } from 'react-router-dom';
 
 interface LayoutProps {
@@ -9,13 +11,12 @@ interface LayoutProps {
 }
 
 export const Layout = ({ children }: LayoutProps) => {
-  const { signOut } = useAuth();
+  const { user } = useAuth();
+  const { data: profile } = useProfile();
   const navigate = useNavigate();
 
-  const handleSignOut = async () => {
-    await signOut();
-    navigate('/auth', { replace: true });
-  };
+  const avatarUrl = profile?.avatar_url || user?.user_metadata?.avatar_url || user?.user_metadata?.picture || null;
+  const fullName = profile?.full_name || user?.user_metadata?.full_name || user?.user_metadata?.name || null;
 
   return (
     <div className="min-h-screen bg-background flex flex-col">
@@ -33,11 +34,16 @@ export const Layout = ({ children }: LayoutProps) => {
           </span>
           <div className="flex-1" />
           <button
-            onClick={handleSignOut}
-            className="p-2 rounded-lg text-muted-foreground hover:text-foreground hover:bg-secondary transition-all"
-            aria-label="Sign out"
+            onClick={() => navigate('/settings')}
+            className="rounded-full ring-2 ring-transparent hover:ring-primary/30 transition-all"
+            aria-label="Settings"
           >
-            <LogOut className="w-4 h-4" />
+            <UserAvatar
+              avatarUrl={avatarUrl}
+              fullName={fullName}
+              email={user?.email}
+              size="sm"
+            />
           </button>
         </div>
       </header>

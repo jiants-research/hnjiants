@@ -79,10 +79,23 @@ const Briefing = () => {
 
   const handleSendAINudge = async (item: typeof analyzedMessages[0], nudgeText: string) => {
     try {
+      // 1. Send Slack message
       await sendSlackNudge(item.channel_id, nudgeText, item.slack_message_ts);
-      setDismissedAnalyzedIds((prev) => new Set(prev).add(item.id));
-      toast.success('AI nudge sent!', { description: 'Reply sent as thread.' });
-      analyzeMutation.mutate(slackMessages);
+
+      // 2. Mark nudge as sent in DB (persistence fix)
+      await markNudgeSent.mutateAsync(item.id);
+
+      // 3. Create follow-up with urgency-based delay
+      await createFollowup.mutateAsync({
+        messageId: item.id,
+        channelId: item.channel_id,
+        slackMessageTs: item.slack_message_ts,
+        taskSummary: item.task_summary || 'Follow up on task',
+        assignee: item.assignee,
+        urgency: item.urgency,
+      });
+
+      toast.success('Nudge sent!', { description: 'Follow-up scheduled automatically.' });
     } catch (err: any) {
       toast.error('Failed to send nudge', { description: err.message });
     }
